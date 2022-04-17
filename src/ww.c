@@ -6,6 +6,7 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <ctype.h>
+#include <assert.h>
 
 #define BUFFERSIZE 64
 
@@ -53,7 +54,7 @@ char checkArgs(int argc, char **argv) {
             perror("Second argument should be an existing regular file or a directory! Please check your input!");
             exit(1);
         }
-    }else if(argc<3){ //if there is only one arg
+    }else if(argc<3){ //if there is only one arg (this is cute, lol)
         return 'e'; //e for empty
     }
 
@@ -212,9 +213,10 @@ int wrapDirectory(DIR *dir, char* dirName, int colSize){
     while (de!=NULL) { //while have not read last entry
     
         //skips files that start with . and start with wrap.
-        while(de!=NULL&&(strncmp (de->d_name, ".",1)==0||strncmp(de->d_name, "wrap.", 5)==0)){
+        while(de!=NULL && (strncmp (de->d_name, ".",1) == 0 || strncmp(de->d_name, "wrap.", 5)==0)){
             de=readdir(dir);
         }
+
 
         //if directory is null bc last entry starts with . or wrap. break out of loop
         if (de==NULL){
@@ -223,7 +225,12 @@ int wrapDirectory(DIR *dir, char* dirName, int colSize){
 
         //get path to files in dir and file info
         char *rpath = readPathName(dirName, de->d_name);
+
         stat(rpath, &sb);
+
+        if (S_ISDIR(sb.st_mode)) { // FIXME: Do some quality control on this
+            wrapDirectory(opendir(rpath), rpath, colSize);
+        }
 
         //checks if file entry is regular file and only lists and read reg files
         if(S_ISREG(sb.st_mode)){
