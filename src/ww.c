@@ -318,6 +318,7 @@ int main(int argc, char **argv) {
                 }
             }
 
+            free(queue);
             return returnVal;
         } else if (argc == 3) {
             return wrapDirectory(opendir(argv[2]), argv[2], atoi(argv[1]), NULL, false, NULL);
