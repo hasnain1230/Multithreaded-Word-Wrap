@@ -294,7 +294,7 @@ int main(int argc, char **argv) {
     } else if (mode == 'd'){
         //printDirEntry(opendir(argv[2]));
 
-        if (argc == 4) {
+        if (argc == 4) { // If we get three arguments and checkArgs didn't fail, then it's recursive and potentially multithreaded.
             struct Queue *queue = initQueue();
 
             if (queue == NULL) {
@@ -303,10 +303,10 @@ int main(int argc, char **argv) {
             }
 
             int status = 0, returnVal = 0;
-            enqueue(queue, argv[3]);
+            enqueue(queue, argv[3]); // Enqueue current path
 
             while (!isEmpty(queue)) {
-                char *dirPath = dequeue(queue);
+                char *dirPath = dequeue(queue); // Dequeue any path that may have been added.
 
                 if (dirPath != NULL) {
                     status = wrapDirectory(opendir(dirPath), dirPath, atoi(argv[2]), argv[1], true, queue);

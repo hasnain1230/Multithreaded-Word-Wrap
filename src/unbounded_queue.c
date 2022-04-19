@@ -4,6 +4,17 @@
 #include <pthread.h>
 #include "unbounded_queue.h"
 
+struct Node { // These are private and not meant to be accessed by client code.
+    char *data;
+    struct Node *next;
+};
+
+struct Queue {
+    struct Node *head, *tail;
+    pthread_mutex_t lock;
+    pthread_cond_t enqueueReady;
+};
+
 struct Queue *initQueue() {
     struct Queue *queue = (struct Queue *) malloc(sizeof(struct Queue));
 
@@ -24,19 +35,19 @@ char *enqueue(struct Queue *queue, char *item) {
     //pthread_mutex_lock(&queue->lock); // FIXME: CHECK RETURN VALUES OF ALL THIS! IF IT FAILS,
 
 
-    struct Node *temp = (struct Node *) malloc(sizeof(struct Node));
+    struct Node *tempNode = (struct Node *) malloc(sizeof(struct Node));
 
-    temp->data = malloc(strlen(item) + 1);
-    strcpy(temp->data, item);
-    temp->next = NULL;
+    tempNode->data = malloc(strlen(item) + 1); // Don't forget your null terminator
+    strcpy(tempNode->data, item); // Because some code in the main client code was messing with memory pointers, I decided to just copy the string, so I can have my own version of the file paths that I managed.
+    tempNode->next = NULL;
 
     if (isEmpty(queue)) {
-        queue->head = queue->tail = temp;
-        return temp->data;
+        queue->head = queue->tail = tempNode; // If empty, head and tail point to the same thing.
+        return tempNode->data;
     }
 
-    queue->tail->next = temp; // tail points to old temp. This says old temp now points to new temp
-    queue->tail = temp;
+    queue->tail->next = tempNode; // tail points to old tempNode. This says old tempNode now points to new tempNode
+    queue->tail = tempNode; // Current tail also needs to point to new tempNode
 
     //pthread_mutex_unlock(&queue->lock);
 
@@ -48,8 +59,8 @@ char *dequeue(struct Queue *queue) {
         return NULL;
     }
 
-    struct Node *temp = queue->head;
-    char *data = temp->data;
+    struct Node *tempNode = queue->head; // Get node to dequeue
+    char *data = tempNode->data; // Need to store the data so we can use it later. Client is responsible for freeing this because it points to dynamic memory. This could be improved so the client doesn't have to do anything, but it's fine for now.
 
     queue->head = queue->head->next;
 
@@ -57,7 +68,7 @@ char *dequeue(struct Queue *queue) {
         queue->tail = NULL;
     }
 
-    free(temp);
+    free(tempNode);
 
     return data;
 }
