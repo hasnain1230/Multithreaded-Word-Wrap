@@ -11,6 +11,7 @@ Where `path/to/folder` is the directory path to where your project files are. Fo
 Once you successfully navigate to the right folder, enter the following commands. This will do the first time setup for your Git repository. Once you do this, you will not need to do this again until or unless you are setting up a new repository elsewhere. In other words, you only do this one time for each repository you are working on. 
 
 Start off by initializing your Git repository and the `main` branch by entering the following command:
+
 ```
 git init -b main
 ```

@@ -6,7 +6,10 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <ctype.h>
-#include <assert.h>
+#include <pthread.h>
+#include <math.h>
+#include <stdbool.h>
+#include "unbounded_queue.h"
 
 #define BUFFERSIZE 64
 
@@ -32,34 +35,44 @@ void checkIfMemoryAllocationFailed(void * ptr) {
 char checkArgs(int argc, char **argv) {
 
     struct stat sb;
+    short recursiveFlag = 0;
 
-    if (argc <= 1 || argc > 3) {
+    if (argc <= 1 || argc > 4) {
         perror("Missing arguments or too many arguments! Please check your input again!");\
         exit(1);
     }
 
-    //do we need to check is argv[1] is an integer as well or is that assumed?
-    if(atoi(argv[1])<1){//if argv is negative
-        perror("Column size argument should be a positive integer greater than zero! Please check your input again!");
-        exit(1);
-    } 
-
-    if(argc==3){ //if there are 2 args
-        stat(argv[2], &sb);
-        if(S_ISREG(sb.st_mode)){ //second arg is a reg file
-            return 'f'; //f for file
-        }else if (S_ISDIR(sb.st_mode)){ //second arg is a directory
-            return 'd'; //d for directory
-        }else{ //checks if file or directory exists
-            perror("Second argument should be an existing regular file or a directory! Please check your input!");
-            exit(1);
+    if (argc == 4) {
+        if (strncmp(argv[1], "-r", 2) == 0) { // We can check the integers later making sure they are positive and formatted correctly when we actually need it. We are wasting time here by checking since it is a bit annoying to get the ints here.
+            recursiveFlag = 1;
+        } else {
+            perror("Three arguments given, but first argument does not begin with -r");
+            exit(2);
         }
-    }else if(argc<3){ //if there is only one arg (this is cute, lol)
+    }
+
+    if (atoi(argv[1 + recursiveFlag]) < 1) { //if column size is zero or negative
+        perror("Column size cannot be zero or negative!");
+        exit(2);
+    }
+
+    if (argc == 3 + recursiveFlag) { //if there are 2 args, first one being for file path, we are not counting that in our documentation, but it is there.
+        stat(argv[2 + recursiveFlag], &sb);
+        if (S_ISREG(sb.st_mode)) { //second arg is a reg file
+            return 'f'; //f for file
+        } else if (S_ISDIR(sb.st_mode)) { //second arg is a directory
+            return 'd'; //d for directory
+        } else { //checks if file or directory exists
+            perror("Second argument should be an existing regular file or a directory! Please check your input!");
+            exit(2);
+        }
+    } else if (argc == 2) { //if there is only one arg (this is cute, lol)
         return 'e'; //e for empty
     }
 
     perror("How did you even get here?");
-    exit(1); //if it reaches here for some reason exit
+    exit(2); //if it reaches here for some reason exit
+
 }
 
 char* readPathName(char* dir, char* de){ //function that creates pathname so i can go through files in dir
@@ -203,8 +216,7 @@ int wrapFile(int fd, size_t colSize, int wfd) { // The function that actually wr
     return status; // Was our process successful once we get here? Status indicates that.
 }
 
-int wrapDirectory(DIR *dir, char* dirName, int colSize){
-
+int wrapDirectory(DIR *dir, char* dirName, int colSize, char *args, bool recursive, struct Queue *queue){
     struct dirent *de;
     struct stat sb;
     de = readdir(dir);
@@ -228,8 +240,8 @@ int wrapDirectory(DIR *dir, char* dirName, int colSize){
 
         stat(rpath, &sb);
 
-        if (S_ISDIR(sb.st_mode)) { // FIXME: Do some quality control on this
-            wrapDirectory(opendir(rpath), rpath, colSize);
+        if (S_ISDIR(sb.st_mode) && recursive == true) { // FIXME: Do some quality control on this
+            enqueue(queue, rpath);
         }
 
         //checks if file entry is regular file and only lists and read reg files
@@ -241,13 +253,15 @@ int wrapDirectory(DIR *dir, char* dirName, int colSize){
             
             //wraps file and if file contains a word larger than colsize then we return 1
             int tempstatus = wrapFile(open(rpath, O_RDONLY), colSize, wfd);
-            if(tempstatus==1){
+
+            if(tempstatus == 1){
                 status = 1;
             }
+
             free(wpath);
-            
         }
         de = readdir(dir);
+
         free(rpath);
 
     }
@@ -271,14 +285,47 @@ void printDirEntry(DIR *dir){ //function that i just use to check the contents o
 int main(int argc, char **argv) {
 
     //this is just an if on how ww will execute depending on the type of argument
+
     char mode = checkArgs(argc, argv);
+
     if (mode == 'f'){
         int wfd = open("/dev/stdout", O_WRONLY|O_APPEND|O_TRUNC); // We use the full path names just to be specific and more clear. Hard coding in file descritor 0 or 1 felt weird to us. 
         return wrapFile(open(argv[2], O_RDONLY), atoi(argv[1]),wfd);
     } else if (mode == 'd'){
         //printDirEntry(opendir(argv[2]));
-        return wrapDirectory(opendir(argv[2]), argv[2], atoi(argv[1]));
-    } else if (mode =='e'){
+
+        if (argc == 4) { // If we get three arguments and checkArgs didn't fail, then it's recursive and potentially multithreaded.
+            struct Queue *queue = initQueue();
+
+            if (queue == NULL) {
+                perror("Queue Initialization Failed: ");
+                exit(2);
+            }
+
+            int status = 0, returnVal = 0;
+            enqueue(queue, argv[3]); // Enqueue current path
+
+            while (!isEmpty(queue)) {
+                char *dirPath = dequeue(queue); // Dequeue any path that may have been added.
+
+                if (dirPath != NULL) {
+                    status = wrapDirectory(opendir(dirPath), dirPath, atoi(argv[2]), argv[1], true, queue);
+                    free(dirPath);
+                }
+
+                if (status == 1) {
+                    returnVal = 1;
+                }
+            }
+
+            free(queue);
+            return returnVal;
+        } else if (argc == 3) {
+            return wrapDirectory(opendir(argv[2]), argv[2], atoi(argv[1]), NULL, false, NULL);
+        }
+
+
+    } else {
         int wfd = open("/dev/stdout", O_WRONLY|O_APPEND|O_TRUNC);
         return wrapFile(open("/dev/stdin", O_RDONLY), atoi(argv[1]),wfd);
     }

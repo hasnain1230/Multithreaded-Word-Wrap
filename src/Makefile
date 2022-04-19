@@ -1,20 +1,21 @@
 TARGET = ww
 CC = gcc
-CFLAGS = -g -std=c99 -Wall -Werror -Wvla -Wextra -Wundef -Wshadow -Wpointer-arith -O2 -fsanitize=address,undefined
-
-
-OBJ = $(TARGET).o
+CFLAGS = -g -std=c99 -Wall -Wvla -Wextra -Wundef -Wshadow -Wpointer-arith -O2 -pthread -fsanitize=address,undefined -fexceptions # -Werror
+DEPENDENCIES = unbounded_queue.o $(TARGET).o
 
 all: $(TARGET)
 
 run: $(TARGET)
 	./$<
 
-$(TARGET): $(OBJ)
+$(TARGET): $(DEPENDENCIES)
 	$(CC) $(CFLAGS) $^ -o $@
 
-$(TARGET).o: $(TARGET).c
+$(TARGET).o: $(TARGET).c unbounded_queue.h
 	$(CC) -c $(CFLAGS) $<
+
+queue.o: unbounded_queue.c unbounded_queue.h
+	$(CC) -c $(CLAGS) $<
 
 clean:
 	rm -rfv $(TARGET) *.o *.a *.dylib *.dSYM
