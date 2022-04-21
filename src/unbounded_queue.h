@@ -7,8 +7,8 @@
 #include <stdbool.h>
 
 struct Queue *initQueue();
-char *enqueue(struct Queue *queue, char *item);
-char *dequeue(struct Queue *queue);
+void *enqueue(struct Queue *queue, void *item, size_t itemSize);
+void *dequeue(struct Queue *queue);
 bool isEmpty(struct Queue *queue);
 
 
