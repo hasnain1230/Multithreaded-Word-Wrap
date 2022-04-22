@@ -272,7 +272,6 @@ int wrapDirectory(DIR *dir, char* dirName, int colSize, bool recursive, bool fil
 
             if (fileThreading) {
                 enqueue(fileQueue, &wfa, sizeof(struct wrapFileArgs *));
-                puts("me like");
             } else {
                 wrapFile(&wfa);
 
@@ -338,8 +337,10 @@ int recursiveThreading(char **args) {
         if (dirPath != NULL) { // FIXME: Because Git was being strange, make sure everything still works as expected!
             status = wrapDirectory(opendir(dirPath), dirPath, atoi(args[2]), true, fileThreading, false, directoryQueue, fileQueue);
             // TODO:  At this point, we start our file threads... later, we will also spawn the directory threads later. We need to rework the queue to allow for all this.
-            while (fileQueue != NULL && !isEmpty(fileQueue)) {
-                struct wrapFileArgs *wfa = dequeue(fileQueue);
+            pthread_t *threads = malloc(sizeof(pthread_t) * fileThreads);
+
+            for (int x = 0; x < fileThreads; x++) {
+                pthread_create(&threads[x], NULL, wrapFile, dequeue(fileQueue));
             }
 
             free(dirPath);

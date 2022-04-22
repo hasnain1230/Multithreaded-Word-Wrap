@@ -13,7 +13,7 @@ struct Queue {
     struct Node *head, *tail;
     size_t queueSize;
     pthread_mutex_t lock;
-    pthread_cond_t enqueueReady;
+    pthread_cond_t dequeueReady, jobComplete;
 };
 
 struct Queue *initQueue() {
@@ -29,13 +29,14 @@ struct Queue *initQueue() {
     queue->queueSize = 0;
 
     pthread_mutex_init(&queue->lock, NULL);
-    pthread_cond_init(&queue->enqueueReady, NULL);
+    pthread_cond_init(&queue->dequeueReady, NULL);
+    pthread_cond_init(&queue->jobComplete, NULL);
 
     return queue;
 }
 
 void *enqueue(struct Queue *queue, void *item, size_t itemSize) {
-    //pthread_mutex_lock(&queue->lock); // FIXME: CHECK RETURN VALUES OF ALL THIS! IF IT FAILS,
+    pthread_mutex_lock(&queue->lock); // FIXME: CHECK RETURN VALUES OF ALL THIS! IF IT FAILS,
 
 
     struct Node *tempNode = (struct Node *) malloc(sizeof(struct Node));
@@ -54,7 +55,7 @@ void *enqueue(struct Queue *queue, void *item, size_t itemSize) {
 
     queue->queueSize++;
 
-    //pthread_mutex_unlock(&queue->lock);
+    pthread_mutex_unlock(&queue->lock);
 
     return item;
 }
