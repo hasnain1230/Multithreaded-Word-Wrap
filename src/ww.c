@@ -26,6 +26,18 @@ struct wrapFileArgs {
     size_t colSize;
 };
 
+struct wrapDirectoryArgs {
+    bool recursive;
+    bool fileThreading;
+    bool directoryThreading;
+    int colSize;
+    int returnVal;
+    DIR *dir;
+    char *dirName;
+    struct Queue *directoryQueue;
+    struct Queue *fileQueue;
+};
+
 void checkWriteSuccess(ssize_t writeValue) {
     if (writeValue == -1) {
         perror("Write failed!");
@@ -225,20 +237,21 @@ void* wrapFile(void *args) { // The function that actually wraps the file conten
 
     wfa->status = status;
 
-    return NULL; // Was our process successful once we get here? Status indicates that.
+    return wfa; // Was our process successful once we get here? Status indicates that.
 }
 
-int wrapDirectory(DIR *dir, char* dirName, int colSize, bool recursive, bool fileThreading, bool directoryThreading, struct Queue *directoryQueue, struct Queue *fileQueue) {
+void *wrapDirectory(void *args) {
+    struct wrapDirectoryArgs *wda= args;
     struct dirent *de;
     struct stat sb;
-    de = readdir(dir);
+    de = readdir(wda->dir);
     int status = 0; //this is put here so we know to return 1 or not if one of the files contains a word size larger than colsize
 
     while (de!=NULL) { //while have not read last entry
 
         //skips files that start with . and start with wrap.
         while(de!=NULL && (strncmp (de->d_name, ".", 1) == 0 || strncmp(de->d_name, "wrap.", 5)==0)){
-            de=readdir(dir);
+            de=readdir(wda->dir);
         }
 
 
@@ -249,29 +262,29 @@ int wrapDirectory(DIR *dir, char* dirName, int colSize, bool recursive, bool fil
 
 
         //get path to files in dir and file info
-        char *rpath = readPathName(dirName, de->d_name);
+        char *rpath = readPathName(wda->dirName, de->d_name);
 
         stat(rpath, &sb);
 
-        if (S_ISDIR(sb.st_mode) && recursive == true) {
-            enqueue(directoryQueue, rpath, strlen(rpath) + 1);
+        if (S_ISDIR(sb.st_mode) && wda->recursive == true) {
+            enqueue(wda->directoryQueue, rpath, strlen(rpath) + 1);
         }
 
         //checks if file entry is regular file and only lists and read reg files
         if(S_ISREG(sb.st_mode)) {
 
             //get path for new wrap. file in directory and open them
-            char *wpath = writePathName(dirName, de->d_name);
+            char *wpath = writePathName(wda->dirName, de->d_name);
             int wfd = open(wpath, O_WRONLY|O_CREAT|O_APPEND|O_TRUNC, S_IRWXU);
 
 
             struct wrapFileArgs wfa;
             wfa.fd = open(rpath, O_RDONLY);
-            wfa.colSize = colSize;
+            wfa.colSize = wda->colSize;
             wfa.wfd = wfd;
 
-            if (fileThreading) {
-                enqueue(fileQueue, &wfa, sizeof(struct wrapFileArgs));
+            if (wda->fileThreading) {
+                enqueue(wda->fileQueue, &wfa, sizeof(struct wrapFileArgs));
             } else {
                 wrapFile(&wfa);
 
@@ -284,13 +297,15 @@ int wrapDirectory(DIR *dir, char* dirName, int colSize, bool recursive, bool fil
                 free(wpath);
             }
         }
-        de = readdir(dir);
+        de = readdir(wda->dir);
         free(rpath);
 
     }
-    closedir(dir); //close dir
+    closedir(wda->dir); //close dir
 
-    return status;
+    wda->returnVal = status;
+
+    return wda;
 }
 
 void printDirEntry(DIR *dir){ //function that i just use to check the contents of my directory
@@ -337,7 +352,19 @@ int recursiveThreading(char **args) {
         char *dirPath = dequeue(directoryQueue); // Dequeue any path that may have been added.
 
         if (dirPath != NULL) { // FIXME: Because Git was being strange, make sure everything still works as expected!
-            status = wrapDirectory(opendir(dirPath), dirPath, atoi(args[2]), true, fileThreading, false, directoryQueue, fileQueue);
+
+            struct wrapDirectoryArgs wda;
+            wda.dir = opendir(dirPath);
+            wda.dirName = dirPath;
+            wda.colSize = atoi(args[2]);
+            wda.recursive = true;
+            wda.fileThreading = fileThreading;
+            wda.directoryThreading = false;
+            wda.directoryQueue = directoryQueue;
+            wda.fileQueue = fileQueue;
+            wrapDirectory(&wda);
+
+            status = wda.returnVal;
             // TODO:  At this point, we start our file threads... later, we will also spawn the directory threads later. We need to rework the queue to allow for all this.
 
             if (fileThreading) {
@@ -390,7 +417,14 @@ int main(int argc, char **argv) {
         if (argc == 4) { // If we get three arguments and checkArgs didn't fail, then it's recursive and potentially multi-threaded.
             return recursiveThreading(argv);
         } else if (argc == 3) {
-            return wrapDirectory(opendir(argv[2]), argv[2], atoi(argv[1]), false, false, false, NULL, NULL);
+            struct wrapDirectoryArgs wda;
+            wda.dir = opendir(argv[2]);
+            wda.dirName = argv[2];
+            wda.colSize = atoi(argv[1]);
+            wda.recursive = wda.fileThreading = wda.directoryThreading = false;
+            wda.directoryQueue = wda.fileQueue = NULL;
+
+            return wda.returnVal;
         }
     } else {
         int wfd = open("/dev/stdout", O_WRONLY|O_APPEND|O_TRUNC);
