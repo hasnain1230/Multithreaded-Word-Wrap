@@ -271,7 +271,7 @@ int wrapDirectory(DIR *dir, char* dirName, int colSize, bool recursive, bool fil
             wfa.wfd = wfd;
 
             if (fileThreading) {
-                enqueue(fileQueue, &wfa, sizeof(struct wrapFileArgs *));
+                enqueue(fileQueue, &wfa, sizeof(struct wrapFileArgs));
             } else {
                 wrapFile(&wfa);
 
@@ -310,6 +310,7 @@ int recursiveThreading(char **args) {
     checkIfMemoryAllocationFailed(directoryQueue);
     struct Queue *fileQueue = NULL;
     bool fileThreading = false;
+    pthread_t *threads = NULL;
 
     if (strlen(args[1]) > 2) {
         sscanf(args[1], "-r%d,%d", &fileThreads, &directoryThreads);
@@ -323,6 +324,7 @@ int recursiveThreading(char **args) {
             fileThreading = true;
             fileQueue = initQueue();
             checkIfMemoryAllocationFailed(fileQueue);
+            threads = malloc(sizeof(pthread_t) * fileThreads);
         }
 
 
@@ -337,13 +339,19 @@ int recursiveThreading(char **args) {
         if (dirPath != NULL) { // FIXME: Because Git was being strange, make sure everything still works as expected!
             status = wrapDirectory(opendir(dirPath), dirPath, atoi(args[2]), true, fileThreading, false, directoryQueue, fileQueue);
             // TODO:  At this point, we start our file threads... later, we will also spawn the directory threads later. We need to rework the queue to allow for all this.
-            pthread_t *threads = malloc(sizeof(pthread_t) * fileThreads);
 
-            for (int x = 0; x < fileThreads; x++) {
-                pthread_create(&threads[x], NULL, wrapFile, dequeue(fileQueue));
+            if (fileThreading) {
+                for (int x = 0; x < fileThreads; x++) {
+                    pthread_create(&threads[x], NULL, wrapFile, dequeue(fileQueue));
+                }
+
+                for (int x = 0; x < fileThreads; x++) {
+                    pthread_join(threads[x], NULL);
+                }
             }
 
             free(dirPath);
+
         }
 
         if (status == 1) {
@@ -351,6 +359,7 @@ int recursiveThreading(char **args) {
         }
     }
 
+    free(threads);
     free(directoryQueue);
     return returnVal;
 }
