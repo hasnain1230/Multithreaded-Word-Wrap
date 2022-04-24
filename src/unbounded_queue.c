@@ -59,10 +59,9 @@ void *enqueue(struct Queue *queue, void *item, size_t itemSize) {
 void *dequeue(struct Queue *queue) {
     pthread_mutex_lock(&queue->lock); // FIXME: CHECK RETURN VALUES OF ALL THIS! IF IT FAILS,
 
-    while (isEmpty(queue)) {
-        puts("Waiting");
-        pthread_cond_wait(&queue->dequeueReady, &queue->lock);
-        pthread_cond_wait(&queue->jobComplete, &queue->lock);
+    if (isEmpty(queue)) {
+        pthread_mutex_unlock(&queue->lock);
+        return NULL;
     }
 
     /*while (isEmpty(queue)) {

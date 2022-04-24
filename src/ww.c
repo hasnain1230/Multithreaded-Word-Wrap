@@ -342,7 +342,10 @@ int recursiveThreading(char **args) {
 
             if (fileThreading) {
                 for (int x = 0; x < fileThreads; x++) {
-                    pthread_create(&threads[x], NULL, wrapFile, dequeue(fileQueue));
+                    char *path = dequeue(fileQueue);
+                    if (path != NULL) {
+                        pthread_create(&threads[x], NULL, wrapFile, path);
+                    }
                 }
 
                 for (int x = 0; x < fileThreads; x++) {

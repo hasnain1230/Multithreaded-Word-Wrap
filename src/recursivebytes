@@ -42,6 +42,3 @@ dd if=/dev/urandom of=file6.txt bs=1m count=1
 dd if=/dev/urandom of=file7.txt bs=1m count=1
 dd if=/dev/urandom of=file8.txt bs=1m count=1
 dd if=/dev/urandom of=file9.txt bs=1m count=1
-
-
-
