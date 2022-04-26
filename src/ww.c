@@ -14,6 +14,8 @@
 
 #define BUFFERSIZE 64
 
+int z = 0;
+
 struct wrappedString {
     char *string;
     size_t size;
@@ -133,6 +135,10 @@ char* writePathName(char* dir, char* de){
 void* wrapFile(void *args) { // The function that actually wraps the file contents
     int status = 0; // Status indicates whether or not the word size is larger than the colSize. In that case, status becomes 1. By default, it is zero.
 
+    if (args == NULL) {
+        return NULL;
+    }
+
     struct wrapFileArgs *wfa = args;
 
     char buffer[BUFFERSIZE]; // By default, it is 64 size.
@@ -234,6 +240,7 @@ void* wrapFile(void *args) { // The function that actually wraps the file conten
     free(ws.string); // Free memory
     free(currentWord);
     close(wfa->fd);
+    close(wfa->wfd);
 
     wfa->status = status;
 
@@ -276,6 +283,7 @@ void *wrapDirectory(void *args) {
             //get path for new wrap. file in directory and open them
             char *wpath = writePathName(wda->dirName, de->d_name);
             int wfd = open(wpath, O_WRONLY|O_CREAT|O_APPEND|O_TRUNC, S_IRWXU);
+            free(wpath);
 
 
             struct wrapFileArgs wfa;
@@ -290,11 +298,11 @@ void *wrapDirectory(void *args) {
 
                 int tempStatus = wfa.status;
 
+
+
                 if (tempStatus == 1) {
                     status = 1;
                 }
-
-                free(wpath);
             }
         }
         de = readdir(wda->dir);
@@ -314,9 +322,29 @@ void printDirEntry(DIR *dir){ //function that i just use to check the contents o
     while (de != NULL) {
         puts(de->d_name);
         de = readdir(dir);
-        }
+    }
     puts("\n");
     closedir(dir);
+}
+
+void *startFileThreads(void *queue) {
+    struct Queue *fileQueue = queue;
+    struct wrapFileArgs *wfa = dequeue(fileQueue);
+    int *status = malloc(sizeof(int));
+
+    while (wfa != NULL) {
+        wrapFile(wfa);
+
+        if (wfa->status == 1) {
+            *status = 1;
+        }
+
+        free(wfa);
+
+        wfa = dequeue(fileQueue);
+    }
+
+    return status;
 }
 
 int recursiveThreading(char **args) {
@@ -340,9 +368,11 @@ int recursiveThreading(char **args) {
             fileQueue = initQueue();
             checkIfMemoryAllocationFailed(fileQueue);
             threads = malloc(sizeof(pthread_t) * fileThreads);
+
+            for (int x = 0; x < fileThreads; x++) {
+                pthread_create(&threads[x], NULL, startFileThreads, fileQueue);
+            }
         }
-
-
     }
 
     int status = 0, returnVal = 0;
@@ -351,7 +381,7 @@ int recursiveThreading(char **args) {
     while (!isEmpty(directoryQueue)) {
         char *dirPath = dequeue(directoryQueue); // Dequeue any path that may have been added.
 
-        if (dirPath != NULL) { // FIXME: Because Git was being strange, make sure everything still works as expected!
+        if (dirPath != NULL) {
 
             struct wrapDirectoryArgs wda;
             wda.dir = opendir(dirPath);
@@ -362,42 +392,45 @@ int recursiveThreading(char **args) {
             wda.directoryThreading = false;
             wda.directoryQueue = directoryQueue;
             wda.fileQueue = fileQueue;
+
             wrapDirectory(&wda);
 
             status = wda.returnVal;
-            // TODO:  At this point, we start our file threads... later, we will also spawn the directory threads later. We need to rework the queue to allow for all this.
-
-            if (fileThreading) {
-                for (int x = 0; x < fileThreads; x++) {
-                    char *path = dequeue(fileQueue);
-                    if (path != NULL) {
-                        pthread_create(&threads[x], NULL, wrapFile, path);
-                    }
-                }
-
-                for (int x = 0; x < fileThreads; x++) {
-                    pthread_join(threads[x], NULL);
-                }
-            }
 
             free(dirPath);
-
         }
+
+
+
 
         if (status == 1) {
             returnVal = 1;
         }
     }
 
+    if (fileThreading) {
+        jobComplete(fileQueue);
+
+        void *returnValue;
+
+        for (int x = 0; x < fileThreads; x++) {
+            pthread_join(threads[x], &returnValue);
+
+            if ((*(int *) returnValue) == 1) {
+                returnVal = 1;
+            }
+
+            free(returnValue);
+        }
+    }
+
     free(threads);
     free(directoryQueue);
+    free(fileQueue);
     return returnVal;
 }
 
 int main(int argc, char **argv) {
-
-    //this is just an if on how ww will execute depending on the type of argument
-
     char mode = checkArgs(argc, argv);
 
     if (mode == 'f'){
@@ -423,6 +456,8 @@ int main(int argc, char **argv) {
             wda.colSize = atoi(argv[1]);
             wda.recursive = wda.fileThreading = wda.directoryThreading = false;
             wda.directoryQueue = wda.fileQueue = NULL;
+
+            wrapDirectory(&wda);
 
             return wda.returnVal;
         }
