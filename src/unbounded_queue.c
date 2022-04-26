@@ -5,14 +5,9 @@
 #include "unbounded_queue.h"
 
 struct Node { // These are private and not meant to be accessed by client code.
-    char *data;
+    void *data;
+    size_t dataSize;
     struct Node *next;
-};
-
-struct Queue {
-    struct Node *head, *tail;
-    pthread_mutex_t lock;
-    pthread_cond_t enqueueReady;
 };
 
 struct Queue *initQueue() {
@@ -25,42 +20,60 @@ struct Queue *initQueue() {
 
     queue->head = queue->tail = NULL;
 
+    queue->queueSize = 0;
+
+    queue->jobComplete = false;
+
     pthread_mutex_init(&queue->lock, NULL);
-    pthread_cond_init(&queue->enqueueReady, NULL);
+    pthread_cond_init(&queue->dequeueReady, NULL);
 
     return queue;
 }
 
-char *enqueue(struct Queue *queue, char *item) {
-    //pthread_mutex_lock(&queue->lock); // FIXME: CHECK RETURN VALUES OF ALL THIS! IF IT FAILS,
+void *enqueue(struct Queue *queue, void *item, size_t itemSize) {
+    pthread_mutex_lock(&queue->lock); // FIXME: CHECK RETURN VALUES OF ALL THIS! IF IT FAILS,
 
 
     struct Node *tempNode = (struct Node *) malloc(sizeof(struct Node));
 
-    tempNode->data = malloc(strlen(item) + 1); // Don't forget your null terminator
-    strcpy(tempNode->data, item); // Because some code in the main client code was messing with memory pointers, I decided to just copy the string, so I can have my own version of the file paths that I managed.
+    tempNode->data = malloc(itemSize); // Don't forget your null terminator
+    memcpy(tempNode->data, item, itemSize);
+    tempNode->dataSize = itemSize;
     tempNode->next = NULL;
 
     if (isEmpty(queue)) {
         queue->head = queue->tail = tempNode; // If empty, head and tail point to the same thing.
+        pthread_mutex_unlock(&queue->lock);
         return tempNode->data;
     }
 
     queue->tail->next = tempNode; // tail points to old tempNode. This says old tempNode now points to new tempNode
     queue->tail = tempNode; // Current tail also needs to point to new tempNode
 
-    //pthread_mutex_unlock(&queue->lock);
+    queue->queueSize++;
+
+    pthread_cond_signal(&queue->dequeueReady);
+    pthread_mutex_unlock(&queue->lock); // FIXME: Check return value
 
     return item;
 }
 
-char *dequeue(struct Queue *queue) {
-    if (isEmpty(queue)) {
-        return NULL;
+void *dequeue(struct Queue *queue) {
+    pthread_mutex_lock(&queue->lock); // FIXME: CHECK RETURN VALUES OF ALL THIS! IF IT FAILS, EXIT
+
+    while (isEmpty(queue)) {
+        if (queue->jobComplete) {
+            pthread_mutex_unlock(&queue->lock);
+            return NULL;
+        }
+
+        pthread_cond_wait(&queue->dequeueReady, &queue->lock);
     }
 
+
     struct Node *tempNode = queue->head; // Get node to dequeue
-    char *data = tempNode->data; // Need to store the data so we can use it later. Client is responsible for freeing this because it points to dynamic memory. This could be improved so the client doesn't have to do anything, but it's fine for now.
+    void *data = malloc(tempNode->dataSize); // Need to store the data, so we can use it later. Client is responsible for freeing this because it points to dynamic memory. This could be improved so the client doesn't have to do anything, but it's fine for now.
+    data = memcpy(data, tempNode->data, tempNode->dataSize);
 
     queue->head = queue->head->next;
 
@@ -68,9 +81,25 @@ char *dequeue(struct Queue *queue) {
         queue->tail = NULL;
     }
 
+    queue->queueSize--;
+
+    free(tempNode->data);
     free(tempNode);
 
+    pthread_mutex_unlock(&queue->lock); // FIXME: CHECK RETURN VALUES OF ALL THIS! IF IT FAILS,
+
     return data;
+}
+
+void jobComplete(struct Queue *queue) {
+    pthread_mutex_lock(&queue->lock);
+
+    queue->jobComplete = true;
+    pthread_cond_broadcast(&queue->dequeueReady);
+
+    pthread_mutex_unlock(&queue->lock);
+
+    return;
 }
 
 bool isEmpty(struct Queue *queue) {

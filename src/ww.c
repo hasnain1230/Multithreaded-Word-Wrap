@@ -9,13 +9,35 @@
 #include <pthread.h>
 #include <math.h>
 #include <stdbool.h>
+#include <assert.h>
 #include "unbounded_queue.h"
 
 #define BUFFERSIZE 64
 
+int z = 0;
+
 struct wrappedString {
     char *string;
     size_t size;
+};
+
+struct wrapFileArgs {
+    int fd;
+    int wfd;
+    int status;
+    size_t colSize;
+};
+
+struct wrapDirectoryArgs {
+    bool recursive;
+    bool fileThreading;
+    bool directoryThreading;
+    int colSize;
+    int returnVal;
+    DIR *dir;
+    char *dirName;
+    struct Queue *directoryQueue;
+    struct Queue *fileQueue;
 };
 
 void checkWriteSuccess(ssize_t writeValue) {
@@ -110,15 +132,21 @@ char* writePathName(char* dir, char* de){
  * on that line.
  */
 
-int wrapFile(int fd, size_t colSize, int wfd) { // The function that actually wraps the file contents
+void* wrapFile(void *args) { // The function that actually wraps the file contents
     int status = 0; // Status indicates whether or not the word size is larger than the colSize. In that case, status becomes 1. By default, it is zero.
+
+    if (args == NULL) {
+        return NULL;
+    }
+
+    struct wrapFileArgs *wfa = args;
 
     char buffer[BUFFERSIZE]; // By default, it is 64 size.
 
     // String and wrapping setup.
     ssize_t numBytesRead;
     struct wrappedString ws;
-    ws.string = calloc(colSize, sizeof(colSize));
+    ws.string = calloc(wfa->colSize, sizeof(wfa->colSize));
     checkIfMemoryAllocationFailed(ws.string); // This function checks for malloc failures.
     ws.size = 0;
 
@@ -126,20 +154,20 @@ int wrapFile(int fd, size_t colSize, int wfd) { // The function that actually wr
     size_t wordSize = 0;
     int consecutiveNewLines = 0;
 
-    while ((numBytesRead = read(fd, buffer, BUFFERSIZE)) > 0) { // We start reading the file here/
+    while ((numBytesRead = read(wfa->fd, buffer, BUFFERSIZE)) > 0) { // We start reading the file here/
         for (int x = 0; x < numBytesRead; x++) {
             if (buffer[x] == '\n') {
                 consecutiveNewLines++;
 
                 if (consecutiveNewLines == 2) { // If we see two new lines in a row, that means we are at a paragraph and need to print out the paragraph.
                     if (ws.size > 0) { // This means we need to flush the current wrapped string before we can continue.
-                        checkWriteSuccess(write(wfd, ws.string , ws.size));
-                        checkWriteSuccess(write(wfd, "\n", 1));
-                        ws.string = memset(ws.string, 0, colSize);
+                        checkWriteSuccess(write(wfa->wfd, ws.string , ws.size));
+                        checkWriteSuccess(write(wfa->wfd, "\n", 1));
+                        ws.string = memset(ws.string, 0, wfa->colSize);
                         ws.size = 0;
                     }
 
-                    checkWriteSuccess(write(wfd, "\n", 1)); // Write newline for next paragraph.
+                    checkWriteSuccess(write(wfa->wfd, "\n", 1)); // Write newline for next paragraph.
                 }
             }
 
@@ -155,25 +183,25 @@ int wrapFile(int fd, size_t colSize, int wfd) { // The function that actually wr
 
                 consecutiveNewLines = 0;
             } else if (buffer[x] == ' ' || buffer[x] == '\n') { // This means we are done reading a word and can start the wrapping process.
-                if (wordSize + 1 > colSize) { // If the word is bigger than colSize...
+                if (wordSize + 1 > wfa->colSize) { // If the word is bigger than colSize...
                     status = 1;
 
                     if (ws.size > 0) { // We may need to flush the current wrapped string before we can deal with the current word.
-                        checkWriteSuccess(write(wfd, ws.string , ws.size));
-                        checkWriteSuccess(write(wfd, "\n", 1));
-                        ws.string = memset(ws.string, 0, colSize);
+                        checkWriteSuccess(write(wfa->wfd, ws.string , ws.size));
+                        checkWriteSuccess(write(wfa->wfd, "\n", 1));
+                        ws.string = memset(ws.string, 0, wfa->colSize);
                         ws.size = 0;
                     }
 
-                    checkWriteSuccess(write(wfd, currentWord , wordSize)); // Print...
-                    checkWriteSuccess(write(wfd, "\n", 1));
+                    checkWriteSuccess(write(wfa->wfd, currentWord , wordSize)); // Print...
+                    checkWriteSuccess(write(wfa->wfd, "\n", 1));
                     currentWord = memset(currentWord, 0, wordSize); // and reset
                     wordSize = 0; // Continue from here.
                 }
 
 
                 if (wordSize > 0) {
-                    if (ws.size + wordSize + 1 <= colSize) { // Check to see if the current word will fit inside the wrapped string. If so, concat it into wrapped string.
+                    if (ws.size + wordSize + 1 <= wfa->colSize) { // Check to see if the current word will fit inside the wrapped string. If so, concat it into wrapped string.
                         if (ws.size > 0) {
                             ws.string[ws.size] = ' '; // Add a space for the word
                         }
@@ -186,10 +214,10 @@ int wrapFile(int fd, size_t colSize, int wfd) { // The function that actually wr
                         }
 
                     } else {
-                        checkWriteSuccess(write(wfd, ws.string, ws.size)); // Else write string and new line character.
-                        checkWriteSuccess(write(wfd, "\n", 1));
+                        checkWriteSuccess(write(wfa->wfd, ws.string, ws.size)); // Else write string and new line character.
+                        checkWriteSuccess(write(wfa->wfd, "\n", 1));
 
-                        ws.string = memset(ws.string, 0, colSize); // Reset everything.
+                        ws.string = memset(ws.string, 0, wfa->colSize); // Reset everything.
                         ws.string = memcpy(ws.string, currentWord, wordSize); // Store the next word we just loaded in...
                         ws.size = wordSize; // Store word size.
                     }
@@ -202,31 +230,35 @@ int wrapFile(int fd, size_t colSize, int wfd) { // The function that actually wr
     }
 
     if (ws.size == 0) {
-        checkWriteSuccess(write(wfd, ws.string, ws.size)); // Write the final wrapped string and flush it out. Then write two new lines, one to end the final wrapped string, and one for the new paragraph.
-        checkWriteSuccess(write(wfd, "\n", 1));
+        checkWriteSuccess(write(wfa->wfd, ws.string, ws.size)); // Write the final wrapped string and flush it out. Then write two new lines, one to end the final wrapped string, and one for the new paragraph.
+        checkWriteSuccess(write(wfa->wfd, "\n", 1));
     } else {
-        checkWriteSuccess(write(wfd, ws.string, ws.size)); // Write the final wrapped string and flush it out. Then write two new lines, one to end the final wrapped string, and one for the new paragraph.
-        checkWriteSuccess(write(wfd, "\n\n", 2));
+        checkWriteSuccess(write(wfa->wfd, ws.string, ws.size)); // Write the final wrapped string and flush it out. Then write two new lines, one to end the final wrapped string, and one for the new paragraph.
+        checkWriteSuccess(write(wfa->wfd, "\n\n", 2));
     }
 
     free(ws.string); // Free memory
     free(currentWord);
-    close(fd);
+    close(wfa->fd);
+    close(wfa->wfd);
 
-    return status; // Was our process successful once we get here? Status indicates that.
+    wfa->status = status;
+
+    return wfa; // Was our process successful once we get here? Status indicates that.
 }
 
-int wrapDirectory(DIR *dir, char* dirName, int colSize, char *args, bool recursive, struct Queue *queue){
+void *wrapDirectory(void *args) {
+    struct wrapDirectoryArgs *wda= args;
     struct dirent *de;
     struct stat sb;
-    de = readdir(dir);
+    de = readdir(wda->dir);
     int status = 0; //this is put here so we know to return 1 or not if one of the files contains a word size larger than colsize
 
     while (de!=NULL) { //while have not read last entry
-    
+
         //skips files that start with . and start with wrap.
-        while(de!=NULL && (strncmp (de->d_name, ".",1) == 0 || strncmp(de->d_name, "wrap.", 5)==0)){
-            de=readdir(dir);
+        while(de!=NULL && (strncmp (de->d_name, ".", 1) == 0 || strncmp(de->d_name, "wrap.", 5)==0)){
+            de=readdir(wda->dir);
         }
 
 
@@ -235,98 +267,210 @@ int wrapDirectory(DIR *dir, char* dirName, int colSize, char *args, bool recursi
             break;
         }
 
+
         //get path to files in dir and file info
-        char *rpath = readPathName(dirName, de->d_name);
+        char *rpath = readPathName(wda->dirName, de->d_name);
 
         stat(rpath, &sb);
 
-        if (S_ISDIR(sb.st_mode) && recursive == true) { // FIXME: Do some quality control on this
-            enqueue(queue, rpath);
+        if (S_ISDIR(sb.st_mode) && wda->recursive == true) {
+            enqueue(wda->directoryQueue, rpath, strlen(rpath) + 1);
         }
 
         //checks if file entry is regular file and only lists and read reg files
-        if(S_ISREG(sb.st_mode)){
+        if(S_ISREG(sb.st_mode)) {
 
             //get path for new wrap. file in directory and open them
-            char *wpath = writePathName(dirName, de->d_name);    
+            char *wpath = writePathName(wda->dirName, de->d_name);
             int wfd = open(wpath, O_WRONLY|O_CREAT|O_APPEND|O_TRUNC, S_IRWXU);
-            
-            //wraps file and if file contains a word larger than colsize then we return 1
-            int tempstatus = wrapFile(open(rpath, O_RDONLY), colSize, wfd);
-
-            if(tempstatus == 1){
-                status = 1;
-            }
-
             free(wpath);
-        }
-        de = readdir(dir);
 
+
+            struct wrapFileArgs wfa;
+            wfa.fd = open(rpath, O_RDONLY);
+            wfa.colSize = wda->colSize;
+            wfa.wfd = wfd;
+
+            if (wda->fileThreading) {
+                enqueue(wda->fileQueue, &wfa, sizeof(struct wrapFileArgs));
+            } else {
+                wrapFile(&wfa);
+
+                int tempStatus = wfa.status;
+
+
+
+                if (tempStatus == 1) {
+                    status = 1;
+                }
+            }
+        }
+        de = readdir(wda->dir);
         free(rpath);
 
     }
-    closedir(dir); //close dir
-    
-    return status;
+    closedir(wda->dir); //close dir
 
+    wda->returnVal = status;
+
+    return wda;
 }
 
-void printDirEntry(DIR *dir){ //function that i just use to check the contents of my directory 
+void printDirEntry(DIR *dir){ //function that i just use to check the contents of my directory
     struct dirent* de;
     de = readdir(dir);
     while (de != NULL) {
         puts(de->d_name);
         de = readdir(dir);
-        }
+    }
     puts("\n");
     closedir(dir);
 }
 
-int main(int argc, char **argv) {
+void *startFileThreads(void *queue) {
+    struct Queue *fileQueue = queue;
+    struct wrapFileArgs *wfa = dequeue(fileQueue);
+    int *status = malloc(sizeof(int));
 
-    //this is just an if on how ww will execute depending on the type of argument
+    while (wfa != NULL) {
+        wrapFile(wfa);
 
-    char mode = checkArgs(argc, argv);
+        if (wfa->status == 1) {
+            *status = 1;
+        }
 
-    if (mode == 'f'){
-        int wfd = open("/dev/stdout", O_WRONLY|O_APPEND|O_TRUNC); // We use the full path names just to be specific and more clear. Hard coding in file descritor 0 or 1 felt weird to us. 
-        return wrapFile(open(argv[2], O_RDONLY), atoi(argv[1]),wfd);
-    } else if (mode == 'd'){
-        //printDirEntry(opendir(argv[2]));
+        free(wfa);
 
-        if (argc == 4) { // If we get three arguments and checkArgs didn't fail, then it's recursive and potentially multithreaded.
-            struct Queue *queue = initQueue();
+        wfa = dequeue(fileQueue);
+    }
 
-            if (queue == NULL) {
-                perror("Queue Initialization Failed: ");
-                exit(2);
+    return status;
+}
+
+int recursiveThreading(char **args) {
+    int fileThreads = 0, directoryThreads = 0;
+    struct Queue *directoryQueue = initQueue();
+    checkIfMemoryAllocationFailed(directoryQueue);
+    struct Queue *fileQueue = NULL;
+    bool fileThreading = false;
+    pthread_t *threads = NULL;
+
+    if (strlen(args[1]) > 2) {
+        sscanf(args[1], "-r%d,%d", &fileThreads, &directoryThreads);
+
+        if (fileThreads < 0 || directoryThreads < 0) {
+            perror("Cannot have negative threads! :");
+            exit(2);
+        }
+
+        if (fileThreads > 0) {
+            fileThreading = true;
+            fileQueue = initQueue();
+            checkIfMemoryAllocationFailed(fileQueue);
+            threads = malloc(sizeof(pthread_t) * fileThreads);
+
+            for (int x = 0; x < fileThreads; x++) {
+                pthread_create(&threads[x], NULL, startFileThreads, fileQueue);
             }
+        }
+    }
 
-            int status = 0, returnVal = 0;
-            enqueue(queue, argv[3]); // Enqueue current path
+    int status = 0, returnVal = 0;
+    enqueue(directoryQueue, args[3], strlen(args[3]) + 1); // Enqueue directory path
 
-            while (!isEmpty(queue)) {
-                char *dirPath = dequeue(queue); // Dequeue any path that may have been added.
+    while (!isEmpty(directoryQueue)) {
+        char *dirPath = dequeue(directoryQueue); // Dequeue any path that may have been added.
 
-                if (dirPath != NULL) {
-                    status = wrapDirectory(opendir(dirPath), dirPath, atoi(argv[2]), argv[1], true, queue);
-                    free(dirPath);
-                }
+        if (dirPath != NULL) {
 
-                if (status == 1) {
-                    returnVal = 1;
-                }
-            }
+            struct wrapDirectoryArgs wda;
+            wda.dir = opendir(dirPath);
+            wda.dirName = dirPath;
+            wda.colSize = atoi(args[2]);
+            wda.recursive = true;
+            wda.fileThreading = fileThreading;
+            wda.directoryThreading = false;
+            wda.directoryQueue = directoryQueue;
+            wda.fileQueue = fileQueue;
 
-            free(queue);
-            return returnVal;
-        } else if (argc == 3) {
-            return wrapDirectory(opendir(argv[2]), argv[2], atoi(argv[1]), NULL, false, NULL);
+            wrapDirectory(&wda);
+
+            status = wda.returnVal;
+
+            free(dirPath);
         }
 
 
+
+
+        if (status == 1) {
+            returnVal = 1;
+        }
+    }
+
+    if (fileThreading) {
+        jobComplete(fileQueue);
+
+        void *returnValue;
+
+        for (int x = 0; x < fileThreads; x++) {
+            pthread_join(threads[x], &returnValue);
+
+            if ((*(int *) returnValue) == 1) {
+                returnVal = 1;
+            }
+
+            free(returnValue);
+        }
+    }
+
+    free(threads);
+    free(directoryQueue);
+    free(fileQueue);
+    return returnVal;
+}
+
+int main(int argc, char **argv) {
+    char mode = checkArgs(argc, argv);
+
+    if (mode == 'f'){
+        int wfd = open("/dev/stdout", O_WRONLY|O_APPEND|O_TRUNC); // We use the full path names just to be specific and more clear. Hard coding in file descriptor 0 or 1 felt weird to us.
+
+        struct wrapFileArgs wfa;
+        wfa.fd = open(argv[2], O_RDONLY);
+        wfa.colSize = atoi(argv[1]);
+        wfa.wfd = wfd;
+
+        wrapFile(&wfa);
+
+        return wfa.status;
+    } else if (mode == 'd') {
+        //printDirEntry(opendir(argv[2]));
+
+        if (argc == 4) { // If we get three arguments and checkArgs didn't fail, then it's recursive and potentially multi-threaded.
+            return recursiveThreading(argv);
+        } else if (argc == 3) {
+            struct wrapDirectoryArgs wda;
+            wda.dir = opendir(argv[2]);
+            wda.dirName = argv[2];
+            wda.colSize = atoi(argv[1]);
+            wda.recursive = wda.fileThreading = wda.directoryThreading = false;
+            wda.directoryQueue = wda.fileQueue = NULL;
+
+            wrapDirectory(&wda);
+
+            return wda.returnVal;
+        }
     } else {
         int wfd = open("/dev/stdout", O_WRONLY|O_APPEND|O_TRUNC);
-        return wrapFile(open("/dev/stdin", O_RDONLY), atoi(argv[1]),wfd);
+
+        struct wrapFileArgs wfa;
+        wfa.fd = open("/dev/stdin", O_RDONLY);
+        wfa.colSize = atoi(argv[1]);
+        wfa.wfd = wfd;
+
+        wrapFile(&wfa);
+
+        return wfa.status;
     }
 }
