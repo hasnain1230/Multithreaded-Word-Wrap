@@ -11,7 +11,7 @@ struct Node { // These are private and not meant to be accessed by client code.
 };
 
 struct Queue {
-    bool jobComplete;
+    bool queueDone;
     struct Node *head, *tail;
     size_t sleepingThreads, queueSize;
     pthread_mutex_t lock;
@@ -28,7 +28,7 @@ struct Queue *initQueue() {
     }
 
     queue->head = queue->tail = NULL;
-    queue->jobComplete = false;
+    queue->queueDone = false;
     queue->sleepingThreads = 0;
     queue->queueSize = 0;
 
@@ -73,7 +73,7 @@ void *dequeue(struct Queue *queue) {
     pthread_mutex_lock(&queue->lock); // FIXME: CHECK RETURN VALUES OF ALL THIS! IF IT FAILS, EXIT
 
     while (isEmpty(queue)) {
-        if (queue->jobComplete) {
+        if (queue->queueDone) {
             pthread_mutex_unlock(&queue->lock);
             return NULL;
         }
@@ -110,12 +110,16 @@ size_t numSleepingThreads(struct Queue *queue) {
 void jobComplete(struct Queue *queue) {
     pthread_mutex_lock(&queue->lock);
 
-    queue->jobComplete = true;
+    queue->queueDone = true;
     pthread_cond_broadcast(&queue->dequeueReady);
 
     pthread_mutex_unlock(&queue->lock);
 
     return;
+}
+
+void awaitJobCompletion(struct Queue *queue, size_t numThreads) {
+
 }
 
 /*void checkIfJobDone(struct Queue *queue, int numDirectoryThreads) {

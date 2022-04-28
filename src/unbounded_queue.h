@@ -10,8 +10,7 @@ struct Queue *initQueue();
 void *enqueue(struct Queue *queue, void *item, size_t itemSize);
 void *dequeue(struct Queue *queue);
 void jobComplete(struct Queue *queue);
-size_t queueSize(struct Queue *queue);
-void checkIfJobDone(struct Queue *queue, int numDirectoryThreads);
+void awaitJobCompletion(struct Queue *queue, size_t numThreads);
 size_t numSleepingThreads(struct Queue *queue);
 bool isEmpty(struct Queue *queue);
 

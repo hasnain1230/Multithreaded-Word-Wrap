@@ -287,6 +287,8 @@ void *wrapDirectory(void *args) {
             wda2->colSize = wda->colSize;
 
             enqueue(wda->directoryQueue, wda2, sizeof(struct wrapDirectoryArgs));
+
+            free(wda2);
         }
 
         //checks if file entry is regular file and only lists and read reg files
@@ -364,6 +366,7 @@ void *startDirectoryThreads(void *queue) {
     while (wda != NULL) {
         wrapDirectory(wda);
 
+        free(wda->dirName);
         free(wda);
 
         wda = dequeue(directoryQueue);
@@ -453,6 +456,7 @@ int recursiveThreading(char **args) {
                     returnVal = 1;
                 }
 
+                free(wda->dirName);
                 free(wda);
             }
         }
@@ -460,9 +464,6 @@ int recursiveThreading(char **args) {
 
 
 
-/*    while (numSleepingThreads(directoryQueue) != directoryThreadsNum || !isEmpty(directoryQueue) || !isEmpty(fileQueue)) { // Should wait for next condition...
-        puts("in here");
-    }*/
 
 
     if (fileThreading) {
@@ -487,9 +488,11 @@ int recursiveThreading(char **args) {
         }
 
         free(fileQueue);
+        free(directoryThreads);
+        free(fileThreads);
     }
 
-    free(fileThreads);
+
     free(directoryQueue);
 
 
