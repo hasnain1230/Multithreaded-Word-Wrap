@@ -11,12 +11,12 @@ struct Node { // These are private and not meant to be accessed by client code.
 };
 
 struct Queue {
-    bool queueDone;
+    bool queueDone, mainThreadTermination;
+    int numOfThreads;
     struct Node *head, *tail;
     size_t sleepingThreads, queueSize;
     pthread_mutex_t lock;
     pthread_cond_t dequeueReady;
-    pthread_cond_t jobDone;
 };
 
 struct Queue *initQueue() {
@@ -32,9 +32,12 @@ struct Queue *initQueue() {
     queue->sleepingThreads = 0;
     queue->queueSize = 0;
 
+    queue->mainThreadTermination = true; // By default, at least
+    queue->numOfThreads = -1; // This is -1 unless main thread termination is false.
+
     pthread_mutex_init(&queue->lock, NULL);
     pthread_cond_init(&queue->dequeueReady, NULL);
-    pthread_cond_init(&queue->jobDone, NULL);
+
 
     return queue;
 }
@@ -79,6 +82,14 @@ void *dequeue(struct Queue *queue) {
         }
 
         queue->sleepingThreads++;
+
+        if (queue->mainThreadTermination == false && queue->sleepingThreads == queue->numOfThreads) {
+            pthread_mutex_unlock(&queue->lock);
+            jobComplete(queue);
+            pthread_mutex_lock(&queue->lock);
+            continue;
+        }
+
         pthread_cond_wait(&queue->dequeueReady, &queue->lock);
         queue->sleepingThreads--;
     }
@@ -118,17 +129,10 @@ void jobComplete(struct Queue *queue) {
     return;
 }
 
-void awaitJobCompletion(struct Queue *queue, size_t numThreads) {
-
+void mainThreadTermination(struct Queue *queue, int numThreads) { // Yes, this is a setter function like Java. I want to avoid using global variables since that is bad practice.
+    queue->mainThreadTermination = false;
+    queue->numOfThreads = numThreads;
 }
-
-/*void checkIfJobDone(struct Queue *queue, int numDirectoryThreads) {
-    pthread_mutex_lock(&queue->lock);
-    while (queue->sleepingThreads != numDirectoryThreads && !isEmpty(queue)) {
-        pthread_cond_wait(&queue->jobDone, &queue->lock);
-    }
-}*/
-
 
 bool isEmpty(struct Queue *queue) {
     return queue->queueSize == 0;

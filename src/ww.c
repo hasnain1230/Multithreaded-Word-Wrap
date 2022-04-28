@@ -12,8 +12,6 @@
 
 #define BUFFERSIZE 64
 
-int z = 0;
-
 struct wrappedString {
     char *string;
     size_t size;
@@ -31,14 +29,9 @@ struct wrapDirectoryArgs {
     bool fileThreading;
     int colSize;
     int returnVal;
+    int numDirectoryThreads;
     DIR *dir;
     char *dirName;
-    struct Queue *directoryQueue;
-    struct Queue *fileQueue;
-};
-
-struct mutltithreadedDirectoryWrapping {
-    int colSize;
     struct Queue *directoryQueue;
     struct Queue *fileQueue;
 };
@@ -63,7 +56,7 @@ char checkArgs(int argc, char **argv) {
     short recursiveFlag = 0;
 
     if (argc <= 1 || argc > 4) {
-        perror("Missing arguments or too many arguments! Please check your input again!");\
+        perror("Missing arguments or too many arguments! Please check your input again!");
         exit(1);
     }
 
@@ -404,24 +397,10 @@ int recursiveThreading(char **args) {
             }
 
             if (directoryThreadsNum > 0) {
+                mainThreadTermination(directoryQueue, directoryThreadsNum);
                 directoryThreading = true;
                 directoryThreads = malloc(sizeof(pthread_t) * directoryThreadsNum);
 
-
-
-/*
-                struct wrapDirectoryArgs initialWda;
-                initialWda.dir = opendir(args[3]);
-                initialWda.dirName = malloc(strlen(args[3]) + 1);
-                initialWda.dirName = strcpy(initialWda.dirName, args[3]);
-                initialWda.colSize = atoi(args[2]);
-                initialWda.recursive = true; // If this function is being called, then we are recursive.
-                initialWda.fileThreading = fileThreading;
-                initialWda.directoryQueue = directoryQueue;
-                initialWda.fileQueue = fileQueue;
-
-                enqueue(directoryQueue, &initialWda, sizeof(struct wrapDirectoryArgs)); // Enqueue directory path
-*/
 
                 for (int x = 0; x < directoryThreadsNum; x++) {
                     pthread_create(&directoryThreads[x], NULL, startDirectoryThreads, directoryQueue);
@@ -443,11 +422,12 @@ int recursiveThreading(char **args) {
     initialWda.fileThreading = fileThreading;
     initialWda.directoryQueue = directoryQueue;
     initialWda.fileQueue = fileQueue;
+    initialWda.numDirectoryThreads = directoryThreadsNum;
 
     enqueue(directoryQueue, &initialWda, sizeof(struct wrapDirectoryArgs)); // Enqueue directory path
 
-    while (!isEmpty(directoryQueue)) {
-        if (!directoryThreading) {
+    if (!directoryThreading) {
+        while (!isEmpty(directoryQueue)) {
             struct wrapDirectoryArgs *wda = dequeue(directoryQueue); // Dequeue any path that may have been added.
             if (wda->dirName != NULL) {
                 wrapDirectory(wda);
@@ -463,10 +443,15 @@ int recursiveThreading(char **args) {
     }
 
 
-
-
-
     if (fileThreading) {
+        if (directoryThreading) {
+            for (int x = 0; x < directoryThreadsNum; x++) {
+                pthread_join(directoryThreads[x], NULL);
+            }
+
+            free(directoryThreads);
+        }
+
         jobComplete(fileQueue);
 
         void *tempReturnVal;
@@ -481,20 +466,11 @@ int recursiveThreading(char **args) {
             free(tempReturnVal);
         }
 
-        jobComplete(directoryQueue);
-
-        for (int x = 0; x < directoryThreadsNum; x++) {
-            pthread_join(directoryThreads[x], NULL);
-        }
-
         free(fileQueue);
-        free(directoryThreads);
         free(fileThreads);
     }
 
-
     free(directoryQueue);
-
 
     return returnVal;
 }
