@@ -412,19 +412,20 @@ int recursiveThreading(char **args) {
 
     int returnVal = 0;
 
-    struct wrapDirectoryArgs initialWda;
+    struct wrapDirectoryArgs *initialWda = malloc(sizeof(struct wrapDirectoryArgs));
 
-    initialWda.dir = opendir(args[3]);
-    initialWda.dirName = malloc(strlen(args[3]) + 1);
-    initialWda.dirName = strcpy(initialWda.dirName, args[3]);
-    initialWda.colSize = atoi(args[2]);
-    initialWda.recursive = true; // If this function is being called, then we are recursive.
-    initialWda.fileThreading = fileThreading;
-    initialWda.directoryQueue = directoryQueue;
-    initialWda.fileQueue = fileQueue;
-    initialWda.numDirectoryThreads = directoryThreadsNum;
+    initialWda->dir = opendir(args[3]);
+    initialWda->dirName = malloc(strlen(args[3]) + 1);
+    initialWda->dirName = strcpy(initialWda->dirName, args[3]);
+    initialWda->colSize = atoi(args[2]);
+    initialWda->recursive = true; // If this function is being called, then we are recursive.
+    initialWda->fileThreading = fileThreading;
+    initialWda->directoryQueue = directoryQueue;
+    initialWda->fileQueue = fileQueue;
+    initialWda->numDirectoryThreads = directoryThreadsNum;
 
-    enqueue(directoryQueue, &initialWda, sizeof(struct wrapDirectoryArgs)); // Enqueue directory path
+    enqueue(directoryQueue, initialWda, sizeof(struct wrapDirectoryArgs)); // Enqueue directory path
+    free(initialWda);
 
     if (!directoryThreading) {
         while (!isEmpty(directoryQueue)) {

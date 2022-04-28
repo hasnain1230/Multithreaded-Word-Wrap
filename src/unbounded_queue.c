@@ -12,9 +12,8 @@ struct Node { // These are private and not meant to be accessed by client code.
 
 struct Queue {
     bool queueDone, mainThreadTermination;
-    int numOfThreads;
     struct Node *head, *tail;
-    size_t sleepingThreads, queueSize;
+    size_t sleepingThreads, queueSize, numOfThreads;;
     pthread_mutex_t lock;
     pthread_cond_t dequeueReady;
 };
@@ -38,18 +37,16 @@ struct Queue *initQueue() {
     pthread_mutex_init(&queue->lock, NULL);
     pthread_cond_init(&queue->dequeueReady, NULL);
 
-
     return queue;
 }
 
 void *enqueue(struct Queue *queue, void *item, size_t itemSize) {
     pthread_mutex_lock(&queue->lock); // FIXME: CHECK RETURN VALUES OF ALL THIS! IF IT FAILS,
 
-
     struct Node *tempNode = (struct Node *) malloc(sizeof(struct Node));
 
     tempNode->data = malloc(itemSize); // Don't forget your null terminator
-    memcpy(tempNode->data, item, itemSize);
+    tempNode->data = memcpy(tempNode->data, item, itemSize);
     tempNode->dataSize = itemSize;
     tempNode->next = NULL;
 
@@ -83,14 +80,14 @@ void *dequeue(struct Queue *queue) {
 
         queue->sleepingThreads++;
 
-        if (queue->mainThreadTermination == false && queue->sleepingThreads == queue->numOfThreads) {
+        while (queue->mainThreadTermination == false && queue->sleepingThreads == queue->numOfThreads && isEmpty(queue)) {
             pthread_mutex_unlock(&queue->lock);
             jobComplete(queue);
             pthread_mutex_lock(&queue->lock);
-            continue;
         }
 
         pthread_cond_wait(&queue->dequeueReady, &queue->lock);
+
         queue->sleepingThreads--;
     }
 
@@ -114,10 +111,6 @@ void *dequeue(struct Queue *queue) {
     return data;
 }
 
-size_t numSleepingThreads(struct Queue *queue) {
-    return queue->sleepingThreads;
-}
-
 void jobComplete(struct Queue *queue) {
     pthread_mutex_lock(&queue->lock);
 
@@ -125,13 +118,13 @@ void jobComplete(struct Queue *queue) {
     pthread_cond_broadcast(&queue->dequeueReady);
 
     pthread_mutex_unlock(&queue->lock);
-
-    return;
 }
 
 void mainThreadTermination(struct Queue *queue, int numThreads) { // Yes, this is a setter function like Java. I want to avoid using global variables since that is bad practice.
+    pthread_mutex_lock(&queue->lock);
     queue->mainThreadTermination = false;
     queue->numOfThreads = numThreads;
+    pthread_mutex_unlock(&queue->lock);
 }
 
 bool isEmpty(struct Queue *queue) {
