@@ -7,14 +7,10 @@
 #include <sys/stat.h>
 #include <ctype.h>
 #include <pthread.h>
-#include <math.h>
 #include <stdbool.h>
-#include <assert.h>
 #include "unbounded_queue.h"
 
 #define BUFFERSIZE 64
-
-int z = 0;
 
 struct wrappedString {
     char *string;
@@ -31,9 +27,9 @@ struct wrapFileArgs {
 struct wrapDirectoryArgs {
     bool recursive;
     bool fileThreading;
-    bool directoryThreading;
     int colSize;
     int returnVal;
+    int numDirectoryThreads;
     DIR *dir;
     char *dirName;
     struct Queue *directoryQueue;
@@ -60,7 +56,7 @@ char checkArgs(int argc, char **argv) {
     short recursiveFlag = 0;
 
     if (argc <= 1 || argc > 4) {
-        perror("Missing arguments or too many arguments! Please check your input again!");\
+        perror("Missing arguments or too many arguments! Please check your input again!");
         exit(1);
     }
 
@@ -248,7 +244,7 @@ void* wrapFile(void *args) { // The function that actually wraps the file conten
 }
 
 void *wrapDirectory(void *args) {
-    struct wrapDirectoryArgs *wda= args;
+    struct wrapDirectoryArgs *wda = args;
     struct dirent *de;
     struct stat sb;
     de = readdir(wda->dir);
@@ -267,14 +263,25 @@ void *wrapDirectory(void *args) {
             break;
         }
 
-
         //get path to files in dir and file info
         char *rpath = readPathName(wda->dirName, de->d_name);
 
         stat(rpath, &sb);
 
         if (S_ISDIR(sb.st_mode) && wda->recursive == true) {
-            enqueue(wda->directoryQueue, rpath, strlen(rpath) + 1);
+            struct wrapDirectoryArgs *wda2 = malloc(sizeof(struct wrapDirectoryArgs));
+            wda2->dir = opendir(rpath);
+            wda2->dirName = malloc(strlen(rpath) + 1);
+            wda2->dirName = strcpy(wda2->dirName, rpath);
+            wda2->directoryQueue = wda->directoryQueue;
+            wda2->fileQueue = wda->fileQueue;
+            wda2->fileThreading = wda->fileThreading;
+            wda2->recursive = wda->recursive;
+            wda2->colSize = wda->colSize;
+
+            enqueue(wda->directoryQueue, wda2, sizeof(struct wrapDirectoryArgs));
+
+            free(wda2);
         }
 
         //checks if file entry is regular file and only lists and read reg files
@@ -284,7 +291,6 @@ void *wrapDirectory(void *args) {
             char *wpath = writePathName(wda->dirName, de->d_name);
             int wfd = open(wpath, O_WRONLY|O_CREAT|O_APPEND|O_TRUNC, S_IRWXU);
             free(wpath);
-
 
             struct wrapFileArgs wfa;
             wfa.fd = open(rpath, O_RDONLY);
@@ -297,8 +303,6 @@ void *wrapDirectory(void *args) {
                 wrapFile(&wfa);
 
                 int tempStatus = wfa.status;
-
-
 
                 if (tempStatus == 1) {
                     status = 1;
@@ -329,6 +333,7 @@ void printDirEntry(DIR *dir){ //function that i just use to check the contents o
 
 void *startFileThreads(void *queue) {
     struct Queue *fileQueue = queue;
+
     struct wrapFileArgs *wfa = dequeue(fileQueue);
     int *status = malloc(sizeof(int));
 
@@ -347,130 +352,312 @@ void *startFileThreads(void *queue) {
     return status;
 }
 
+void *startDirectoryThreads(void *queue) {
+    struct Queue *directoryQueue = queue;
+    struct wrapDirectoryArgs *wda = dequeue(directoryQueue);
+
+    while (wda != NULL) {
+        wrapDirectory(wda);
+
+        free(wda->dirName);
+        free(wda);
+
+        wda = dequeue(directoryQueue);
+    }
+
+    return NULL;
+}
+
 int recursiveThreading(char **args) {
-    int fileThreads = 0, directoryThreads = 0;
+    int fileThreadsNum = 0, directoryThreadsNum = 0;
     struct Queue *directoryQueue = initQueue();
     checkIfMemoryAllocationFailed(directoryQueue);
+
     struct Queue *fileQueue = NULL;
-    bool fileThreading = false;
-    pthread_t *threads = NULL;
+    bool fileThreading = false, directoryThreading = false;
+    pthread_t *fileThreads = NULL, *directoryThreads = NULL;
 
     if (strlen(args[1]) > 2) {
-        sscanf(args[1], "-r%d,%d", &fileThreads, &directoryThreads);
+        sscanf(args[1], "-r%d,%d", &fileThreadsNum, &directoryThreadsNum);
 
-        if (fileThreads < 0 || directoryThreads < 0) {
-            perror("Cannot have negative threads! :");
+        if (fileThreadsNum < 0 || directoryThreadsNum < 0) {
+            perror("Cannot have negative fileThreads! :");
             exit(2);
         }
 
-        if (fileThreads > 0) {
+        if (fileThreadsNum > 0) {
             fileThreading = true;
             fileQueue = initQueue();
             checkIfMemoryAllocationFailed(fileQueue);
-            threads = malloc(sizeof(pthread_t) * fileThreads);
+            fileThreads = malloc(sizeof(pthread_t) * fileThreadsNum);
+            checkIfMemoryAllocationFailed(fileThreads);
 
-            for (int x = 0; x < fileThreads; x++) {
-                pthread_create(&threads[x], NULL, startFileThreads, fileQueue);
+            for (int x = 0; x < fileThreadsNum; x++) {
+                pthread_create(&fileThreads[x], NULL, startFileThreads, fileQueue);
+            }
+
+            if (directoryThreadsNum > 0) {
+                mainThreadTermination(directoryQueue, directoryThreadsNum);
+                directoryThreading = true;
+                directoryThreads = malloc(sizeof(pthread_t) * directoryThreadsNum);
+
+
+                for (int x = 0; x < directoryThreadsNum; x++) {
+                    pthread_create(&directoryThreads[x], NULL, startDirectoryThreads, directoryQueue);
+                }
             }
         }
     }
 
-    int status = 0, returnVal = 0;
-    enqueue(directoryQueue, args[3], strlen(args[3]) + 1); // Enqueue directory path
 
-    while (!isEmpty(directoryQueue)) {
-        char *dirPath = dequeue(directoryQueue); // Dequeue any path that may have been added.
+    int returnVal = 0;
 
-        if (dirPath != NULL) {
+    struct wrapDirectoryArgs *initialWda = malloc(sizeof(struct wrapDirectoryArgs));
 
-            struct wrapDirectoryArgs wda;
-            wda.dir = opendir(dirPath);
-            wda.dirName = dirPath;
-            wda.colSize = atoi(args[2]);
-            wda.recursive = true;
-            wda.fileThreading = fileThreading;
-            wda.directoryThreading = false;
-            wda.directoryQueue = directoryQueue;
-            wda.fileQueue = fileQueue;
+    initialWda->dir = opendir(args[3]);
+    initialWda->dirName = malloc(strlen(args[3]) + 1);
+    initialWda->dirName = strcpy(initialWda->dirName, args[3]);
+    initialWda->colSize = atoi(args[2]);
+    initialWda->recursive = true; // If this function is being called, then we are recursive.
+    initialWda->fileThreading = fileThreading;
+    initialWda->directoryQueue = directoryQueue;
+    initialWda->fileQueue = fileQueue;
+    initialWda->numDirectoryThreads = directoryThreadsNum;
 
-            wrapDirectory(&wda);
+    enqueue(directoryQueue, initialWda, sizeof(struct wrapDirectoryArgs)); // Enqueue directory path
+    free(initialWda);
 
-            status = wda.returnVal;
+    if (!directoryThreading) {
+        while (!isEmpty(directoryQueue)) {
+            struct wrapDirectoryArgs *wda = dequeue(directoryQueue); // Dequeue any path that may have been added.
+            if (wda->dirName != NULL) {
+                wrapDirectory(wda);
 
-            free(dirPath);
-        }
+                if (wda->returnVal == 1) {
+                    returnVal = 1;
+                }
 
-
-
-
-        if (status == 1) {
-            returnVal = 1;
+                free(wda->dirName);
+                free(wda);
+            }
         }
     }
 
+
     if (fileThreading) {
+        if (directoryThreading) {
+            for (int x = 0; x < directoryThreadsNum; x++) {
+                pthread_join(directoryThreads[x], NULL);
+            }
+
+            free(directoryThreads);
+        }
+
         jobComplete(fileQueue);
 
-        void *returnValue;
+        void *tempReturnVal;
 
-        for (int x = 0; x < fileThreads; x++) {
-            pthread_join(threads[x], &returnValue);
+        for (int x = 0; x < fileThreadsNum; x++) {
+            pthread_join(fileThreads[x], &tempReturnVal);
 
-            if ((*(int *) returnValue) == 1) {
+            if ((*(int *) tempReturnVal) == 1) {
                 returnVal = 1;
             }
 
-            free(returnValue);
+            free(tempReturnVal);
         }
+
+        free(fileQueue);
+        free(fileThreads);
     }
 
-    free(threads);
     free(directoryQueue);
-    free(fileQueue);
+
     return returnVal;
 }
 
-int main(int argc, char **argv) {
-    char mode = checkArgs(argc, argv);
+int extraCredit(int argc, char **argv){
+    struct stat sb;
+    int colSize;
+    struct wrapFileArgs wfa;
+    struct wrapDirectoryArgs wda;
+    char *dirName;
+    char *fileName;
+    char *wpath;
+    char *pathName;
 
-    if (mode == 'f'){
-        int wfd = open("/dev/stdout", O_WRONLY|O_APPEND|O_TRUNC); // We use the full path names just to be specific and more clear. Hard coding in file descriptor 0 or 1 felt weird to us.
+    // int finalStatus = 0;
 
-        struct wrapFileArgs wfa;
-        wfa.fd = open(argv[2], O_RDONLY);
-        wfa.colSize = atoi(argv[1]);
-        wfa.wfd = wfd;
+    if(strncmp(argv[1], "-r", 2) == 0) {
+        colSize = atoi(argv[2]);
 
-        wrapFile(&wfa);
+        for (int i = 3; i < argc; i++) {
+            int statSuccess = stat(argv[i], &sb);
 
-        return wfa.status;
-    } else if (mode == 'd') {
-        //printDirEntry(opendir(argv[2]));
+            if (statSuccess < 0) {
+                perror("Argument should be an existing regular file or a directory! Please check your input!");
+                exit(2);
+            }
 
-        if (argc == 4) { // If we get three arguments and checkArgs didn't fail, then it's recursive and potentially multi-threaded.
-            return recursiveThreading(argv);
-        } else if (argc == 3) {
-            struct wrapDirectoryArgs wda;
-            wda.dir = opendir(argv[2]);
-            wda.dirName = argv[2];
-            wda.colSize = atoi(argv[1]);
-            wda.recursive = wda.fileThreading = wda.directoryThreading = false;
-            wda.directoryQueue = wda.fileQueue = NULL;
+            if (S_ISREG(sb.st_mode)) { //second arg is a reg file
+                printf("Reg: %d\n", statSuccess);
+                wfa.colSize = colSize;
+                wfa.fd = open(argv[i], O_RDONLY);
+                wfa.status = 0;
 
-            wrapDirectory(&wda);
+                int count = 0;
+                pathName = argv[i];
 
-            return wda.returnVal;
+                for(int j = strlen(pathName)-1; pathName[j] != '/'; j--){
+                    count++;
+                }
+
+                dirName = malloc(strlen(argv[i]) - count);
+                fileName = malloc(count + 2);
+
+                dirName = strncpy(dirName, pathName, strlen(pathName)-count - 1);
+                dirName[strlen(pathName)-count - 1] = '\0';
+                fileName = strncpy(fileName, &pathName[strlen(pathName)-count], count+2);
+
+                wpath = writePathName(dirName, fileName);
+
+                wfa.wfd = open(wpath, O_WRONLY|O_CREAT|O_APPEND|O_TRUNC, S_IRWXU); //need to change this to
+
+                wrapFile(&wfa);
+
+                free(dirName);
+                free(fileName);
+                free(wpath);
+
+            } else if (S_ISDIR(sb.st_mode)) { //second arg is a directory
+                char **argumentArray = malloc(sizeof(char *) * argc);
+                argumentArray[0] = malloc(strlen(argv[0]) + 1);
+                argumentArray[0] = strcpy(argumentArray[0], argv[0]);
+                argumentArray[1] = malloc(strlen(argv[1]) + 1);
+                argumentArray[1] = strcpy(argumentArray[1], argv[1]);
+                argumentArray[2] = malloc(strlen(argv[2]) + 1);
+                argumentArray[2] = strcpy(argumentArray[2], argv[2]);
+                argumentArray[3] = malloc(strlen(argv[i]) + 1);
+                argumentArray[3] = strcpy(argumentArray[3], argv[i]);
+
+                recursiveThreading(argumentArray);
+
+                free(argumentArray[0]);
+                free(argumentArray[1]);
+                free(argumentArray[2]);
+                free(argumentArray[3]);
+            }
         }
+    } else if(atoi(argv[1]) > 1) {
+        colSize = atoi(argv[1]);
+
+        for(int i = 2; i < argc; i++) {
+            int statSuccess = stat(argv[i], &sb);
+
+            if (statSuccess < 0) {
+                perror("Argument should be an existing regular file or a directory! Please check your input!");
+                exit(2);
+            }
+
+            if (S_ISREG(sb.st_mode)) { //second arg is a reg file
+
+                wfa.colSize = colSize;
+                wfa.fd = open(argv[i], O_RDONLY);
+                wfa.status = 0;
+
+                int count = 0;
+                pathName = argv[i];
+
+                for(int j = strlen(pathName)-1; pathName[j] != '/'; j--){
+                    count++;
+                }
+
+                dirName = malloc(strlen(argv[i]) - count);
+                fileName = malloc(count + 2);
+
+                dirName = strncpy(dirName, pathName, strlen(pathName)-count - 1);
+                dirName[strlen(pathName)-count - 1] = '\0';
+                fileName = strncpy(fileName, &pathName[strlen(pathName)-count], count+2); // Why count + 2?
+
+                wpath = writePathName(dirName, fileName);
+
+                wfa.wfd = open(wpath, O_WRONLY|O_CREAT|O_APPEND|O_TRUNC, S_IRWXU); //need to change this to
+
+                wrapFile(&wfa);
+
+                free(dirName);
+                free(fileName);
+                free(wpath);
+
+            } else if (S_ISDIR(sb.st_mode)) { //second arg is a directory
+
+                wda.colSize = colSize;
+                wda.dir = opendir(argv[i]);
+                wda.dirName = malloc(strlen(argv[i]) + 1);
+                wda.dirName = strcpy(wda.dirName, argv[i]);
+                wda.returnVal = 0;
+                wda.recursive = false;
+                wda.fileThreading = false;
+                wda.directoryQueue = NULL;
+                wda.fileQueue = NULL;
+
+                wrapDirectory(&wda);
+
+                free(wda.dirName);
+
+            }
+        }
+    }
+
+    return 0;
+}
+
+int main(int argc, char **argv) {
+    if (argc > 4 || (argc == 4 && strncmp(argv[1], "-r", 2) != 0)) { // Check the first argument to see what's going on...
+        extraCredit(argc, argv);
+        return 0;
     } else {
-        int wfd = open("/dev/stdout", O_WRONLY|O_APPEND|O_TRUNC);
+        char mode = checkArgs(argc, argv);
+        if (mode == 'f') {
+            int wfd = open("/dev/stdout", O_WRONLY | O_APPEND |
+                                          O_TRUNC); // We use the full path names just to be specific and more clear. Hard coding in file descriptor 0 or 1 felt weird to us.
 
-        struct wrapFileArgs wfa;
-        wfa.fd = open("/dev/stdin", O_RDONLY);
-        wfa.colSize = atoi(argv[1]);
-        wfa.wfd = wfd;
+            struct wrapFileArgs wfa;
+            wfa.fd = open(argv[2], O_RDONLY);
+            wfa.colSize = atoi(argv[1]);
+            wfa.wfd = wfd;
 
-        wrapFile(&wfa);
+            wrapFile(&wfa);
 
-        return wfa.status;
+            return wfa.status;
+        } else if (mode == 'd') {
+            //printDirEntry(opendir(argv[2]));
+
+            if (argc == 4) { // If we get three arguments and checkArgs didn't fail, then it's recursive and potentially multi-threaded.
+                return recursiveThreading(argv);
+            } else if (argc == 3) {
+                struct wrapDirectoryArgs wda;
+                wda.dir = opendir(argv[2]);
+                wda.dirName = argv[2];
+                wda.colSize = atoi(argv[1]);
+                wda.recursive = wda.fileThreading = false;
+                wda.directoryQueue = wda.fileQueue = NULL;
+
+                wrapDirectory(&wda);
+
+                return wda.returnVal;
+            }
+        } else {
+            int wfd = open("/dev/stdout", O_WRONLY | O_APPEND | O_TRUNC);
+
+            struct wrapFileArgs wfa;
+            wfa.fd = open("/dev/stdin", O_RDONLY);
+            wfa.colSize = atoi(argv[1]);
+            wfa.wfd = wfd;
+
+            wrapFile(&wfa);
+
+            return wfa.status;
+        }
     }
 }
