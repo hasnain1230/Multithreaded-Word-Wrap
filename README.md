@@ -14,7 +14,7 @@ have formatting imperfections. While we did our best to validate it, for the eas
 - Carolette Saguil (cas699)
 - Hasnain Ali (ha430)
 
-# Introduction - Word Wrapper
+# Introduction - Multi-threaded Word Wrapper
 This is a Word Wrapper that applies the "Greedy Wrapping" algorithm. This means, given
 a column size by the user, we will wrap a file based on that column size. For example, suppose
 `file1.txt` is written like so:
@@ -51,6 +51,17 @@ As you can see in the example above, the original text from `file1.txt` is now w
 of 15. If the next word exceeds column width, it is printed on the next line. This is consisted with `pa2.pdf` and the write-up
 given to us by Professor Menendez. 
 
+**READ THIS PART... PA3 Information Starts Here** <br>
+Additionally, now, in `pa3` (this project), this same program now has the option for recursive directory traversal and multithreading. For example,
+if the `-r` option is passed followed by a column size and a directory (respectively), this program will loop through each directory and every subdirectory, 
+wrapping the files as it goes. It will create new wrapped files with wrapped text in the following format: `wrap.<file_name>`. Inside, there will be wrapped text from the wrapped files passed in.
+This will be true for the current directory and all subdirectories. 
+
+Also, along with passing in the `-r` option, we also allow for specifying multiple file threads and directory threads. For example,
+an option like this `-r5` will create 5 files threads. Whereas, an option like `-r5,6` will create 5 directory threads and 6 files threads. Please note the spacing as this program is space sensitive.
+
+**PLEASE NOTE: WE DID COMPLETE THE EXTRA CREDIT. THIS PROGRAM DOES ALLOW FOR MULTIPLE ARGUMENTS TO BE PASSED IN AND HAVE ALL THOSE ARGUMENTS BE COMPLETED.**
+
 # Pre-Requisites
 This program was only intended to be executed on `x86` and `x86_64` architectures. This program
 assumes that the hardware will be consistent with that of `x86` and `x86_64` architecture. This requires the hardware to use 2s complement and
@@ -64,6 +75,43 @@ files and any other files you pass into `ww`. Furthermore, please make sure you 
 for any files or directories you pass in.
 
 ## Test Plan
+For our test plan, all the same functionality specified below (and in PA2) must still work. That means that all the original functionality must still be the same.
+For our code to be correct, we need to allow the `-r` option indicating recursive directory traversal. That is, every time we find a new directory, we also wrap all the files in that directory.
+Furthermore, if the user specifies `N` file threads, then our program will be multi-threaded. That is, `N` threads will be spawned to do the actual file wrapping. So, if the argument is passed in like this:
+`-rN` (with all the other proper arguments, that is, with a column size and a directory name), then `N` threads will be spawned and the files will be wrapped according to the proper format (with the `wrap.`) prefix.
+Likewise, if the option `-rM,N` where `M` is the directory threads and `N` is the file threads, then `M` directory threads will be spawned to do the directory traversal and `N`
+file threads will be spawned to do the wrapping. 
+
+**Furthermore, this program also can do the extra credit assignment, that is, it can take in multiple arguments and wrap the file or directory accordingly. Please see Canvas for more details about this.
+This program is capable of doing that.** 
+
+### What We Are Trying To Prove (PA3)
+- We are trying to prove that this program is capable of recursively traversing through a specified directory and wrapping the files as it goes.
+- If `N` file threads are specified like so: `-rN`, then it will spawn `N` threads to do the file wrapping.
+- If `M` directory threads are specified and `N` directory threads, like this: `-rM,N`, then `M` threads are spawned for the directory wrapping and `N` threads are spawned for the file wrapping.
+- Lastly, if multiple sets of arguments are passed in, then as per the extra credit, all those arguments will be processed and wrapped accordingly.
+
+### How We Determined Our Program Was Correct (PA3):
+To determine our program was correct, we ran a series of stress tests.
+- We first put print statements in basically everywhere the treading and enqueuing occurred. This is how we knew that the threading was occurring.
+- We also tested to make sure that the threads were ending at the right time. We did this by keeping track of everything the threads would need to know to terminate.
+- We also made sure that our return value was correct when returning at the end.
+- We made sure that the program can take in multiple arguments.
+- We made sure that each of the threads were starting, once again with print statements.
+- We made sure that the wrapped files were being generated as specified above.
+- We made sure that the text was actually wrapping.
+- We made sure all previous functionality worked.
+- We made sure the threads ended in the way they were supposed to
+- We made sure that everything is working as intended according to the project write up.
+- We also wrote a quick script that generated random bytes and wrote them into directories and subdirectories. You can use this script in your own testing
+  - In the `src` directory, run the following command:
+    - `./recursivebytes` This will create a randomly generated directory with subdirectories that we also did testing on.
+    This allowed us to create very big files easily to see the effects of multithreading and to ensure that our code was working. Feel free to use it as you wish.
+- We also have functions in `unbounded_queue.c` that will check if memory allocation or if any pthread function fails.
+    
+
+**Everything Below Must Be True As These Are The Same Parameters For PA2. Everything below still applies to our test plan.** <br><br>
+
 In order to stress test our word wrapper, we used various different stress tests we will detail below. From strange 
 while space to multiple paragraphs to everything being in one line, we have tested even the most unlikely scenarios to make
 sure everything was correct. Below, we detail this further. 
@@ -176,7 +224,27 @@ We tested directories that included:
 This program is designed in two parts. The first part actually reads from the input file (which may be `stdin`), tokenizes the words,
 and wraps each string according to rules stated [here](#how-we-determined-program-was-correct) as well as in the write-up `pa2.pdf`. The second part writes the wrapped string
 denoted as a `struct wrappedString` into either the file specified by the user, or `stdout` depending on `argv`.
-## Part 1
+## (PA3) Part 1
+- If the `-r` option is passed, the following function will be called:
+  - `int recursiveThreading(char **args)`
+    - This function will check if the `-r` option is passed properly (with a column size and a directory that exists). If that's the case, then
+    this function will recursively iterate through the directories and wrap each file in the directory and all of its subdirectories with new wrapped files created, all with the `wrapped.` prefix.
+
+## (PA3) Part 2
+- If the `-r` option is passed with `N` threads, like `-rN` then the program will be multithreaded and iterate through all the files in the directory and its subdirectories.
+  - just like it did in part 1. The only difference here is that the program will use `N` threads to do the wrapping.
+
+## (PA3) Part 3
+- If the `-r` option is passed with `M` directory threads and `N` file threads, then the program once again will be multi-threaded and will also be recursive.
+It will create `M` directory threads and `N` file threads. Similar to part 2, all files in the directory and its subdirectories will be wrapped in the format specified above. Only this time, there will be
+`M` directory threads doing the traversal and `N` file threads doing wrapping. 
+
+# (PA3) EXTRA CREDIT
+- If multiple arguments are passed in, that is, if more than the optional `-r` option, a column size, and a file/directory are passed in, then each of those arguments will be processed.
+For example, if the user passes in `-r <column size> <directoryName> <fileName> <directoryName>`, then all the directories, files, and second directories will be wrapped. The second 
+directory will also be recursively wrapped since the `-r` option was specified.
+
+## (PA2) Part 1
 - `int wrapFile(int fd, size_t colSize, int wfd)`
   - This function is the main function that will take a file descriptor input `fd`, read the files contents
   word by word (tokenizing each word), and wrap the files contents according to the rules described above in 
@@ -191,7 +259,7 @@ denoted as a `struct wrappedString` into either the file specified by the user, 
   need to store the word for the next buffer), and print it on the appropriate line so that the line does not exceed `colSize`.
   - In our extensive testing, we tested many scenarios that stressed tested these design properties.
   - Returns either 1 or 0 based on the exit status; were we able to wrap to the specified `colSize`? Did every word fit within the specified `colSize`?
-## Part 2
+## (PA2) Part 2
 - `char* readPathName(char*  dir,  char*  de)`:
    - This function takes the arguments of the directory name and the file name.
    - Uses `strcat` to add a `/` in between the directory name and the file name to get the path for the file we need to read (e.g. `dirName/fileName.txt`).
@@ -212,8 +280,8 @@ denoted as a `struct wrappedString` into either the file specified by the user, 
 - `char  checkArgs(int  argc,  char  **argv)`:
    - Checks if the arguments are valid by checking if there is:
       - The correct number of arguments inputted by the user.
-      - If first argument is a positive integer
-      - If the second argument is an existing file or directory
+      - If first argument is a positive integer OR the `-r` recursive argument.
+      - If the second argument is an existing file or directory (may also be a column number, depending on if the optional `-r` option was passed).
       - **Please note: When we say first argument, we are ignoring `argv[0]`, that is technically
      the first argument, but for simplicity’s sake, we disregard that and assume it to be true.**
    - If the arguments do not pass these check they will print out errors and exit with status 2 since status 1 is reserved for when
@@ -232,6 +300,13 @@ denoted as a `struct wrappedString` into either the file specified by the user, 
   - On success, we return and continue with the program.
 - `void checkIfMemoryAllocationFailed(void *ptr)`
   - This function checks if calls to `malloc` or `calloc` or `realloc` were successful. If not, we return with exit code status 2 and end the program.
+- `recursiveThreading(char **args)`
+  - This function will process the `-r` argument and if there are a specified number of file, or a specific number of file threads and directory threads,
+  this function will spawn them all in and multi-thread.
+  - So, if only the `-r` option is passed into the program, the directories and all the subdirectories will be wrapped as expected (with the `wrap.` prefix behind each new file created).
+  - If `N` file threads are passed with the `-r` option like this: `-rN`, then multiple file threads will be spawned in and created. These threads will do the file wrapping in the directories as new directories and files are added to the queue.
+  - If `M` directory threads are passed and `N` file threads are passed with the `-r` option like this: `-rM,N`, then `M` directory threads will be spawned to traverse the directories and `N` file threads will be spawned to wrap the files in the directory in the format stated
+  previously.
 
 # Execution Instructions
 To run this program, the directions are fairly simple and obvious. Nonetheless, here are some instructions to follow in case you are having trouble. <br/> <br/>
@@ -270,6 +345,19 @@ or
 ./ww <colsize>
 ```
 
+or you can specify the recursive option with -r
+```asm
+./ww -r <colsize> <directoryName>
+```
+or you can also specify N file threads you want to spawn
+```
+./ww -rN <colsize> <directoryName>
+```
+or you can spawn N file threads and M directory threads by doing the following:
+```asm
+./ww -rM,N <colsize> <directoryName>
+```
+
 To clean all compiled executables and any other binary files left behind, enter:
 ```asm
 make clean
@@ -287,3 +375,4 @@ Which will clean the project and only leave behind the source code, `ww.c` and t
     - `-Wpointer-arith`: Warn if any invalid or risky pointer arithmetic occurs.
     - `-fsanitize=address,undefined`: We include this because this program involves the use of dynamic arrays, 
   and we want to make sure that our memory is handled as best as we can (to ensure no overflows or leaks occur). We also compile with undefined sanitizer to ensure no undefined behavior occurs. This is for security and behavioral purposes.
+    - `-pthread` Required when using the `pthread.h` library.
