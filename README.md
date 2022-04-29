@@ -107,6 +107,7 @@ To determine our program was correct, we ran a series of stress tests.
   - In the `src` directory, run the following command:
     - `./recursivebytes` This will create a randomly generated directory with subdirectories that we also did testing on.
     This allowed us to create very big files easily to see the effects of multithreading and to ensure that our code was working. Feel free to use it as you wish.
+- We also have functions in `unbounded_queue.c` that will check if memory allocation or if any pthread function fails.
     
 
 **Everything Below Must Be True As These Are The Same Parameters For PA2. Everything below still applies to our test plan.** <br><br>
