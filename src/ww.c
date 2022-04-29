@@ -331,6 +331,10 @@ void printDirEntry(DIR *dir){ //function that i just use to check the contents o
     closedir(dir);
 }
 
+/*
+ * Starts file threads.
+ */
+
 void *startFileThreads(void *queue) {
     struct Queue *fileQueue = queue;
 
@@ -352,6 +356,9 @@ void *startFileThreads(void *queue) {
     return status;
 }
 
+/*
+ * Starts directory threads.
+ */
 void *startDirectoryThreads(void *queue) {
     struct Queue *directoryQueue = queue;
     struct wrapDirectoryArgs *wda = dequeue(directoryQueue);
@@ -368,6 +375,10 @@ void *startDirectoryThreads(void *queue) {
     return NULL;
 }
 
+/*
+ * This function processes the -r argument and any file or directory threading numbers. If there is file or directory threading arguments
+ * then the appropriate threads are started and created.
+ */
 int recursiveThreading(char **args) {
     int fileThreadsNum = 0, directoryThreadsNum = 0;
     struct Queue *directoryQueue = initQueue();
@@ -476,6 +487,9 @@ int recursiveThreading(char **args) {
     return returnVal;
 }
 
+/*
+ * Processes multiple arguments as specified by the extra credit.
+ */
 int extraCredit(int argc, char **argv){
     struct stat sb;
     int colSize;
@@ -486,7 +500,7 @@ int extraCredit(int argc, char **argv){
     char *wpath;
     char *pathName;
 
-    // int finalStatus = 0;
+    int finalStatus = 0;
 
     if(strncmp(argv[1], "-r", 2) == 0) {
         colSize = atoi(argv[2]);
@@ -525,6 +539,10 @@ int extraCredit(int argc, char **argv){
 
                 wrapFile(&wfa);
 
+                if (wfa.status == 1) {
+                    finalStatus = 1;
+                }
+
                 free(dirName);
                 free(fileName);
                 free(wpath);
@@ -540,7 +558,11 @@ int extraCredit(int argc, char **argv){
                 argumentArray[3] = malloc(strlen(argv[i]) + 1);
                 argumentArray[3] = strcpy(argumentArray[3], argv[i]);
 
-                recursiveThreading(argumentArray);
+                int status = recursiveThreading(argumentArray);
+
+                if (status == 1) {
+                    finalStatus = 1;
+                }
 
                 free(argumentArray[0]);
                 free(argumentArray[1]);
@@ -585,6 +607,10 @@ int extraCredit(int argc, char **argv){
 
                 wrapFile(&wfa);
 
+                if (wfa.status == 1) {
+                    finalStatus = 1;
+                }
+
                 free(dirName);
                 free(fileName);
                 free(wpath);
@@ -603,24 +629,27 @@ int extraCredit(int argc, char **argv){
 
                 wrapDirectory(&wda);
 
+                if (wda.returnVal == 1) {
+                    finalStatus = 1;
+                }
+
                 free(wda.dirName);
 
             }
         }
     }
 
-    return 0;
+    return finalStatus;
 }
 
 int main(int argc, char **argv) {
     if (argc > 4 || (argc == 4 && strncmp(argv[1], "-r", 2) != 0)) { // Check the first argument to see what's going on...
-        extraCredit(argc, argv);
-        return 0;
+        int status = extraCredit(argc, argv);
+        return status;
     } else {
-        char mode = checkArgs(argc, argv);
+        char mode = checkArgs(argc, argv); // Processes arguments if there are not multiple sets of arguments
         if (mode == 'f') {
-            int wfd = open("/dev/stdout", O_WRONLY | O_APPEND |
-                                          O_TRUNC); // We use the full path names just to be specific and more clear. Hard coding in file descriptor 0 or 1 felt weird to us.
+            int wfd = open("/dev/stdout", O_WRONLY | O_APPEND | O_TRUNC); // We use the full path names just to be specific and more clear. Hard coding in file descriptor 0 or 1 felt weird to us.
 
             struct wrapFileArgs wfa;
             wfa.fd = open(argv[2], O_RDONLY);

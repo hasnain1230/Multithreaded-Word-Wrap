@@ -54,7 +54,7 @@ struct Queue *initQueue() {
     return queue;
 }
 
-void *enqueue(struct Queue *queue, void *item, size_t itemSize) {
+void enqueue(struct Queue *queue, void *item, size_t itemSize) {
     pthread_mutex_lock(&queue->lock);
 
     struct Node *tempNode = (struct Node *) malloc(sizeof(struct Node));
@@ -70,7 +70,8 @@ void *enqueue(struct Queue *queue, void *item, size_t itemSize) {
         queue->queueSize++;
         pthread_cond_signal(&queue->dequeueReady);
         pthread_mutex_unlock(&queue->lock);
-        return tempNode->data;
+
+        return;
     }
 
     queue->tail->next = tempNode; // tail points to old tempNode. This says old tempNode now points to new tempNode
@@ -81,7 +82,7 @@ void *enqueue(struct Queue *queue, void *item, size_t itemSize) {
     pthread_cond_signal(&queue->dequeueReady);
     pthread_mutex_unlock(&queue->lock); // FIXME: Check return value
 
-    return item;
+    return;
 }
 
 void *dequeue(struct Queue *queue) {

@@ -7,7 +7,7 @@
 #include <stdbool.h>
 
 struct Queue *initQueue();
-void *enqueue(struct Queue *queue, void *item, size_t itemSize);
+void enqueue(struct Queue *queue, void *item, size_t itemSize);
 void *dequeue(struct Queue *queue);
 void jobComplete(struct Queue *queue);
 void mainThreadTermination(struct Queue *queue, int numThreads);
