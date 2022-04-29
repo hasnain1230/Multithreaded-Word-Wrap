@@ -18,6 +18,20 @@ struct Queue {
     pthread_cond_t dequeueReady;
 };
 
+void checkMemoryAllocation(void *ptr) {
+    if (ptr == NULL) {
+        perror("Memory Allocation Failed: ");
+        exit(2);
+    }
+}
+
+void checkThreadFunction(int returnValThread) {
+    if (returnValThread != 0) {
+        perror("Threading Function Failed!");
+        exit(2);
+    }
+}
+
 struct Queue *initQueue() {
     struct Queue *queue = (struct Queue *) malloc(sizeof(struct Queue));
 
@@ -34,18 +48,19 @@ struct Queue *initQueue() {
     queue->mainThreadTermination = true; // By default, at least
     queue->numOfThreads = -1; // This is -1 unless main thread termination is false.
 
-    pthread_mutex_init(&queue->lock, NULL);
-    pthread_cond_init(&queue->dequeueReady, NULL);
+    checkThreadFunction(pthread_mutex_init(&queue->lock, NULL));
+    checkThreadFunction(pthread_cond_init(&queue->dequeueReady, NULL));
 
     return queue;
 }
 
 void *enqueue(struct Queue *queue, void *item, size_t itemSize) {
-    pthread_mutex_lock(&queue->lock); // FIXME: CHECK RETURN VALUES OF ALL THIS! IF IT FAILS,
+    pthread_mutex_lock(&queue->lock);
 
     struct Node *tempNode = (struct Node *) malloc(sizeof(struct Node));
 
     tempNode->data = malloc(itemSize); // Don't forget your null terminator
+    checkMemoryAllocation(tempNode->data);
     tempNode->data = memcpy(tempNode->data, item, itemSize);
     tempNode->dataSize = itemSize;
     tempNode->next = NULL;
